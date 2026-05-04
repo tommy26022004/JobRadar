@@ -8,7 +8,7 @@ Paste job URL → AI tự parse JD → match với CV → chấm điểm fit →
 |---|---|
 | Frontend | Next.js + Tailwind + shadcn/ui |
 | Backend | FastAPI + Python |
-| AI Agent | LangGraph + GPT-4o |
+| AI Agent | LangGraph + Gemini 1.5 Flash (Google AI free tier) |
 | Database | PostgreSQL (Docker local → Railway production) |
 | Deploy | Vercel (Frontend) + Railway (Backend + DB) |
 
@@ -19,7 +19,7 @@ Paste job URL → AI tự parse JD → match với CV → chấm điểm fit →
 
 - [ ] Setup project structure: `jobradar-backend/` + `jobradar-frontend/`
 - [ ] Docker Compose: FastAPI + PostgreSQL chạy local 1 lệnh
-- [ ] Database schema: `users`, `jobs`, `applications`
+- [ ] Database schema: `users`, `jobs`, `applications`, `cvs` (nhiều CV per user)
 - [ ] JWT auth: register, login, refresh token
 - [ ] API endpoints cơ bản: CRUD cho job applications
 - [ ] Test manual toàn bộ endpoints bằng Thunder Client
@@ -31,14 +31,14 @@ Paste job URL → AI tự parse JD → match với CV → chấm điểm fit →
 ## Tuần 2 — AI Core
 **Mục tiêu:** Paste URL → AI hiểu JD → match CV → cho điểm
 
-- [ ] Web scraper: fetch raw HTML từ job URL (BeautifulSoup)
+- [ ] JD input: user paste raw text của JD (không scrape URL — tránh bị block)
 - [ ] LangGraph agent pipeline:
   - Node 1: Parse JD → extract title, company, stack, requirements, salary
-  - Node 2: So sánh với CV của user → tính match score
+  - Node 2: User chọn CV nào để match → so sánh → tính match score
   - Node 3: Generate gợi ý customize CV
 - [ ] Streaming response (user thấy AI đang "suy nghĩ")
 - [ ] Lưu kết quả parse vào PostgreSQL
-- [ ] Test với 10 job URL thật từ WeWorkRemotely
+- [ ] Test với 10 JD thật (copy từ TopCV / WeWorkRemotely)
 
 **Deliverable:** Paste link → 30 giây sau có analysis + score
 
@@ -79,5 +79,5 @@ GitHub repo với:
 ✓ Live demo link
 ✓ README có GIF demo
 ✓ Docker Compose để run local
-✓ LangGraph + GPT-4o + FastAPI + Next.js + PostgreSQL
+✓ LangGraph + Gemini 1.5 Flash + FastAPI + Next.js + PostgreSQL
 ```
