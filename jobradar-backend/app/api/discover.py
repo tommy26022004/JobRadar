@@ -104,6 +104,8 @@ async def discover(
                         "company": job.company,
                         "url": job.url,
                         "region": job.region,
+                        "region_group": job.region_group,
+                        "job_type": job.job_type,
                         "score": score_data["score"],
                         "reason": score_data["reason"],
                         "description": job.description[:500],

@@ -1,6 +1,6 @@
 import httpx
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 import asyncio
 
@@ -15,6 +15,19 @@ WWR_FEEDS = {
 REMOTEOK_FEED = "https://remoteok.com/remote-jobs.rss"
 REMOTIVE_FEED = "https://remotive.com/api/remote-jobs"
 
+# job_type values
+JOB_TYPE_FULL = "full-time"
+JOB_TYPE_PART = "part-time"
+JOB_TYPE_CONTRACT = "contract"
+JOB_TYPE_FREELANCE = "freelance"
+JOB_TYPE_UNKNOWN = "unknown"
+
+# region_group values — used for timezone filtering
+REGION_APAC = "Asia-Pacific"
+REGION_EUROPE = "Europe"
+REGION_AMERICAS = "Americas"
+REGION_WORLDWIDE = "Worldwide"
+
 
 @dataclass
 class RemoteJob:
@@ -25,6 +38,8 @@ class RemoteJob:
     description: str
     region: str
     source: str = "WeWorkRemotely"
+    job_type: str = JOB_TYPE_UNKNOWN   # full-time / part-time / contract / freelance / unknown
+    region_group: str = REGION_WORLDWIDE  # Asia-Pacific / Europe / Americas / Worldwide
 
 
 def _clean_html(text: str) -> str:
@@ -36,6 +51,49 @@ def _clean_html(text: str) -> str:
     text = re.sub(r"&#\d+;", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
+
+def _detect_job_type(title: str, description: str) -> str:
+    """Detect job type from title and description text."""
+    text = (title + " " + description[:500]).lower()
+    if re.search(r"\bpart[- ]time\b", text):
+        return JOB_TYPE_PART
+    if re.search(r"\bfreelance\b", text):
+        return JOB_TYPE_FREELANCE
+    if re.search(r"\bcontract\b|\bcontractor\b", text):
+        return JOB_TYPE_CONTRACT
+    if re.search(r"\bfull[- ]time\b", text):
+        return JOB_TYPE_FULL
+    return JOB_TYPE_UNKNOWN
+
+
+def _normalize_region_group(region: str) -> str:
+    """Map raw region string to one of 4 timezone groups."""
+    r = region.lower()
+
+    apac_kw = ["asia", "apac", "pacific", "australia", "singapore", "malaysia",
+               "japan", "korea", "india", "china", "taiwan", "philippines",
+               "indonesia", "vietnam", "thailand", "new zealand", "hong kong"]
+    europe_kw = ["europe", "european", "eu", "uk", "emea", "germany", "france",
+                 "spain", "italy", "netherlands", "poland", "portugal", "sweden",
+                 "norway", "denmark", "finland", "switzerland", "austria",
+                 "belgium", "ireland", "czech", "romania", "ukraine"]
+    americas_kw = ["usa", "us only", "united states", "america", "canada",
+                   "latin america", "latam", "mexico", "brazil", "argentina",
+                   "colombia", "chile", "peru", "north america"]
+
+    for kw in apac_kw:
+        if kw in r:
+            return REGION_APAC
+    for kw in americas_kw:
+        if kw in r:
+            return REGION_AMERICAS
+    for kw in europe_kw:
+        if kw in r:
+            return REGION_EUROPE
+
+    # "worldwide" / empty / unknown → truly global
+    return REGION_WORLDWIDE
 
 
 async def _fetch_wwr_feed(client: httpx.AsyncClient, url: str, limit: int) -> list[RemoteJob]:
@@ -83,14 +141,18 @@ async def _fetch_wwr_feed(client: httpx.AsyncClient, url: str, limit: int) -> li
         if not title or not link:
             continue
 
+        region = region_el.text or "Worldwide" if region_el is not None else "Worldwide"
+
         jobs.append(RemoteJob(
             id=job_id,
             title=title,
             company=company,
             url=link,
             description=description,
-            region=region_el.text or "Worldwide" if region_el is not None else "Worldwide",
+            region=region,
             source="WeWorkRemotely",
+            job_type=_detect_job_type(title, description),
+            region_group=_normalize_region_group(region),
         ))
 
     return jobs
@@ -121,7 +183,6 @@ async def _fetch_remoteok(client: httpx.AsyncClient, limit: int) -> list[RemoteJ
         title = re.sub(r"\s+", " ", title_el.text or "").strip() if title_el is not None else ""
         link = (link_el.text or "").strip() if link_el is not None else ""
 
-        # RemoteOK title format: "Company - Title" or just title
         company = ""
         if " - " in title:
             parts = title.split(" - ", 1)
@@ -134,6 +195,23 @@ async def _fetch_remoteok(client: httpx.AsyncClient, limit: int) -> list[RemoteJ
         guid_el = item.find("guid")
         job_id = guid_el.text or link if guid_el is not None else link
 
+        # RemoteOK has <tag> elements with job type info
+        tags = [t.text or "" for t in item.findall("tag")]
+        tags_text = " ".join(tags).lower()
+
+        if "part-time" in tags_text or "part time" in tags_text:
+            job_type = JOB_TYPE_PART
+        elif "contract" in tags_text:
+            job_type = JOB_TYPE_CONTRACT
+        elif "freelance" in tags_text:
+            job_type = JOB_TYPE_FREELANCE
+        else:
+            job_type = _detect_job_type(title, description)
+
+        # RemoteOK has <location> tag sometimes
+        location_el = item.find("location")
+        region = location_el.text or "Worldwide" if location_el is not None else "Worldwide"
+
         if not title or not link:
             continue
 
@@ -143,21 +221,30 @@ async def _fetch_remoteok(client: httpx.AsyncClient, limit: int) -> list[RemoteJ
             company=company,
             url=link,
             description=description,
-            region="Worldwide",
+            region=region,
             source="RemoteOK",
+            job_type=job_type,
+            region_group=_normalize_region_group(region),
         ))
 
     return jobs
 
 
 async def _fetch_remotive(client: httpx.AsyncClient, limit: int) -> list[RemoteJob]:
-    # Remotive has a JSON API
     try:
         resp = await client.get(REMOTIVE_FEED, headers={"User-Agent": "JobRadar/1.0"}, timeout=15)
         resp.raise_for_status()
         data = resp.json()
     except Exception:
         return []
+
+    # Remotive job_type values: "full_time", "part_time", "contract", "freelance"
+    type_map = {
+        "full_time": JOB_TYPE_FULL,
+        "part_time": JOB_TYPE_PART,
+        "contract": JOB_TYPE_CONTRACT,
+        "freelance": JOB_TYPE_FREELANCE,
+    }
 
     jobs = []
     for item in data.get("jobs", [])[:limit]:
@@ -166,7 +253,9 @@ async def _fetch_remotive(client: httpx.AsyncClient, limit: int) -> list[RemoteJ
         url = item.get("url", "")
         description = _clean_html(item.get("description", ""))[:3000]
         job_id = str(item.get("id", url))
-        candidate_required = item.get("candidate_required_location", "Worldwide")
+        region = item.get("candidate_required_location", "") or "Worldwide"
+        raw_type = item.get("job_type", "")
+        job_type = type_map.get(raw_type, _detect_job_type(title, description))
 
         if not title or not url:
             continue
@@ -177,15 +266,16 @@ async def _fetch_remotive(client: httpx.AsyncClient, limit: int) -> list[RemoteJ
             company=company,
             url=url,
             description=description,
-            region=candidate_required or "Worldwide",
+            region=region,
             source="Remotive",
+            job_type=job_type,
+            region_group=_normalize_region_group(region),
         ))
 
     return jobs
 
 
 async def _fetch_custom_rss(client: httpx.AsyncClient, url: str, limit: int) -> list[RemoteJob]:
-    """Generic RSS parser for custom URLs."""
     try:
         resp = await client.get(url, headers={"User-Agent": "JobRadar/1.0"}, timeout=15)
         resp.raise_for_status()
@@ -197,39 +287,32 @@ async def _fetch_custom_rss(client: httpx.AsyncClient, url: str, limit: int) -> 
     except ET.ParseError:
         return []
 
-    # Support both RSS (channel/item) and Atom (entry) formats
     channel = root.find("channel")
     if channel is not None:
         items = channel.findall("item")[:limit]
     else:
-        ns = {"atom": "http://www.w3.org/2005/Atom"}
-        items = root.findall("atom:entry", ns)[:limit]
-        if not items:
-            items = root.findall("{http://www.w3.org/2005/Atom}entry")[:limit]
+        items = root.findall("{http://www.w3.org/2005/Atom}entry")[:limit]
 
     jobs = []
     for item in items:
-        # Try both RSS and Atom tag names
-        def get_text(tag, alt=None):
+        def get_text(tag: str) -> str:
             el = item.find(tag)
-            if el is None and alt:
-                el = item.find(alt)
-            if el is None:
-                return ""
-            return (el.text or "").strip()
+            return (el.text or "").strip() if el is not None else ""
 
         title = get_text("title")
         link_el = item.find("link")
         if link_el is not None:
-            link = link_el.text or link_el.get("href", "")
+            link = (link_el.text or link_el.get("href", "")).strip()
         else:
             link = ""
 
-        description = _clean_html(get_text("description") or get_text("summary") or get_text("content"))[:3000]
+        description = _clean_html(
+            get_text("description") or get_text("summary") or get_text("content")
+        )[:3000]
+
         guid_el = item.find("guid")
         job_id = (guid_el.text if guid_el is not None else None) or link
 
-        # Try to extract company from title "Company: Title" or "Company - Title"
         company = ""
         for sep in [":", " - "]:
             if sep in title:
@@ -249,6 +332,8 @@ async def _fetch_custom_rss(client: httpx.AsyncClient, url: str, limit: int) -> 
             description=description,
             region="Worldwide",
             source=url,
+            job_type=_detect_job_type(title, description),
+            region_group=REGION_WORLDWIDE,
         ))
 
     return jobs
@@ -259,12 +344,6 @@ async def fetch_all_jobs(
     sources: list[str] | None = None,
     custom_urls: list[str] | None = None,
 ) -> list[RemoteJob]:
-    """
-    Fetch jobs from all enabled sources in parallel, deduplicate by URL.
-    sources: list of source names to include — ["wwr", "remoteok", "remotive"]
-             defaults to all three if None
-    custom_urls: extra RSS feed URLs to scrape
-    """
     if sources is None:
         sources = ["wwr", "remoteok", "remotive"]
 
@@ -286,7 +365,6 @@ async def fetch_all_jobs(
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Merge + deduplicate by URL
     seen_urls: set[str] = set()
     all_jobs: list[RemoteJob] = []
     for result in results:
@@ -300,7 +378,6 @@ async def fetch_all_jobs(
     return all_jobs
 
 
-# Keep backward-compat for existing code
 async def fetch_jobs(category: str = "programming", limit: int = 20) -> list[RemoteJob]:
     feed_url = WWR_FEEDS.get(category, WWR_FEEDS["programming"])
     async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:

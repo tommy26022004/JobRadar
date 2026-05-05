@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { Loader2, ExternalLink, Plus, ArrowLeft, Briefcase, FileText, LogOut, X } from "lucide-react";
+import { Loader2, ExternalLink, Plus, ArrowLeft, Briefcase, FileText, LogOut, X, SlidersHorizontal } from "lucide-react";
 
 type DiscoveredJob = {
   id: string;
@@ -17,6 +17,8 @@ type DiscoveredJob = {
   company: string;
   url: string;
   region: string;
+  region_group: string;
+  job_type: string;
   score: number;
   reason: string;
   description: string;
@@ -28,6 +30,36 @@ const SOURCES = [
   { key: "remoteok", label: "RemoteOK" },
   { key: "remotive", label: "Remotive" },
 ];
+
+const JOB_TYPES = [
+  { key: "all", label: "All types" },
+  { key: "full-time", label: "Full-time" },
+  { key: "part-time", label: "Part-time" },
+  { key: "contract", label: "Contract" },
+  { key: "freelance", label: "Freelance" },
+];
+
+const REGIONS = [
+  { key: "all", label: "Anywhere" },
+  { key: "Worldwide", label: "Worldwide only" },
+  { key: "Asia-Pacific", label: "Asia-Pacific" },
+  { key: "Europe", label: "Europe" },
+  { key: "Americas", label: "Americas" },
+];
+
+const SOURCE_COLORS: Record<string, string> = {
+  WeWorkRemotely: "bg-blue-50 text-blue-700 border-blue-200",
+  RemoteOK: "bg-green-50 text-green-700 border-green-200",
+  Remotive: "bg-purple-50 text-purple-700 border-purple-200",
+};
+
+const JOB_TYPE_COLORS: Record<string, string> = {
+  "full-time": "bg-emerald-50 text-emerald-700 border-emerald-200",
+  "part-time": "bg-amber-50 text-amber-700 border-amber-200",
+  "contract": "bg-orange-50 text-orange-700 border-orange-200",
+  "freelance": "bg-sky-50 text-sky-700 border-sky-200",
+  "unknown": "bg-zinc-50 text-zinc-400 border-zinc-200",
+};
 
 export default function DiscoverPage() {
   const { user, loading: authLoading, logout } = useAuth();
@@ -41,6 +73,11 @@ export default function DiscoverPage() {
   const [status, setStatus] = useState<"idle" | "running" | "done">("idle");
   const [progress, setProgress] = useState({ matched: 0, total: 0, message: "" });
   const [tracking, setTracking] = useState<Set<string>>(new Set());
+
+  // Filters (applied client-side after results arrive)
+  const [filterType, setFilterType] = useState("all");
+  const [filterRegion, setFilterRegion] = useState("all");
+  const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
@@ -89,10 +126,11 @@ export default function DiscoverPage() {
     params.set("limit_per_source", "50");
     enabledSources.forEach(s => params.append("sources", s));
     customUrls.forEach(u => params.append("custom_urls", u));
-    const url = `${base}/discover/?${params.toString()}`;
 
     try {
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${base}/discover/?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!res.ok) throw new Error("Failed to start discovery");
       if (!res.body) throw new Error("No response body");
 
@@ -157,13 +195,28 @@ export default function DiscoverPage() {
     }
   };
 
-  if (authLoading || !user) return null;
+  // Client-side filter
+  const filteredJobs = useMemo(() => {
+    return jobs.filter(job => {
+      if (filterType !== "all") {
+        if (filterType === "full-time" && job.job_type !== "full-time" && job.job_type !== "unknown") return false;
+        if (filterType !== "full-time" && job.job_type !== filterType) return false;
+      }
+      if (filterRegion !== "all") {
+        if (filterRegion === "Worldwide") {
+          // show Worldwide + Asia-Pacific (friendly for MY timezone)
+          if (job.region_group === "Americas" || job.region_group === "Europe") return false;
+        } else {
+          if (job.region_group !== filterRegion && job.region_group !== "Worldwide") return false;
+        }
+      }
+      return true;
+    });
+  }, [jobs, filterType, filterRegion]);
 
-  const sourceColors: Record<string, string> = {
-    WeWorkRemotely: "bg-blue-50 text-blue-700 border-blue-200",
-    RemoteOK: "bg-green-50 text-green-700 border-green-200",
-    Remotive: "bg-purple-50 text-purple-700 border-purple-200",
-  };
+  const activeFilterCount = (filterType !== "all" ? 1 : 0) + (filterRegion !== "all" ? 1 : 0);
+
+  if (authLoading || !user) return null;
 
   return (
     <div className="min-h-screen bg-zinc-50">
@@ -197,9 +250,9 @@ export default function DiscoverPage() {
           </div>
         </div>
 
+        {/* Scan config */}
         <Card>
           <CardContent className="p-4 space-y-4">
-            {/* Sources */}
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Job Sources</p>
               <div className="flex flex-wrap gap-2">
@@ -212,17 +265,13 @@ export default function DiscoverPage() {
               </div>
             </div>
 
-            {/* Custom RSS */}
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Custom RSS Feed (optional)</p>
               <div className="flex gap-2">
-                <Input
-                  placeholder="https://example.com/jobs.rss"
-                  value={customInput}
+                <Input placeholder="https://example.com/jobs.rss" value={customInput}
                   onChange={e => setCustomInput(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && addCustomUrl()}
-                  className="text-sm"
-                />
+                  className="text-sm" />
                 <Button variant="outline" size="sm" onClick={addCustomUrl}>Add</Button>
               </div>
               {customUrls.length > 0 && (
@@ -237,7 +286,6 @@ export default function DiscoverPage() {
               )}
             </div>
 
-            {/* CV selector */}
             {cvs.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Match with CV</p>
@@ -255,7 +303,7 @@ export default function DiscoverPage() {
             <Button onClick={handleDiscover} disabled={status === "running" || !selectedCv} className="w-full gap-2">
               {status === "running"
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Scanning jobs...</>
-                : `Scan & Match Jobs`}
+                : "Scan & Match Jobs"}
             </Button>
           </CardContent>
         </Card>
@@ -288,35 +336,103 @@ export default function DiscoverPage() {
         {/* Results */}
         {jobs.length > 0 && (
           <div className="space-y-3">
-            {status === "done" && (
+            {/* Filter bar */}
+            <div className="flex items-center justify-between">
               <p className="text-sm text-muted-foreground">
-                {jobs.length} jobs ranked by match score
-                {" · "}{jobs.filter(j => j.score >= 70).length} strong matches (≥70%)
+                {status === "done"
+                  ? `${filteredJobs.length} of ${jobs.length} jobs · ${jobs.filter(j => j.score >= 70).length} strong matches`
+                  : `${jobs.length} found, ranking live...`}
               </p>
+              <button
+                onClick={() => setShowFilters(v => !v)}
+                className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors ${showFilters || activeFilterCount > 0 ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400"}`}>
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+                Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+              </button>
+            </div>
+
+            {showFilters && (
+              <Card>
+                <CardContent className="p-4 space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Job Type</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {JOB_TYPES.map(t => (
+                          <button key={t.key} onClick={() => setFilterType(t.key)}
+                            className={`px-3 py-1 rounded-full text-xs border transition-colors ${filterType === t.key ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400"}`}>
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Region / Timezone</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {REGIONS.map(r => (
+                          <button key={r.key} onClick={() => setFilterRegion(r.key)}
+                            className={`px-3 py-1 rounded-full text-xs border transition-colors ${filterRegion === r.key ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400"}`}>
+                            {r.label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {filterRegion === "Asia-Pacific" && "Shows Asia-Pacific + Worldwide jobs — timezone-friendly for Malaysia (UTC+8)"}
+                        {filterRegion === "Worldwide" && "Shows Worldwide + Asia-Pacific — excludes Americas/Europe-only roles"}
+                        {filterRegion === "Europe" && "Shows Europe + Worldwide jobs"}
+                        {filterRegion === "Americas" && "Shows Americas + Worldwide jobs"}
+                      </p>
+                    </div>
+                  </div>
+                  {activeFilterCount > 0 && (
+                    <button onClick={() => { setFilterType("all"); setFilterRegion("all"); }}
+                      className="text-xs text-muted-foreground hover:text-foreground underline">
+                      Clear all filters
+                    </button>
+                  )}
+                </CardContent>
+              </Card>
             )}
-            {status === "running" && jobs.length > 0 && (
-              <p className="text-sm text-muted-foreground">{jobs.length} matches so far, ranked live...</p>
+
+            {filteredJobs.length === 0 && (
+              <div className="text-center py-8 text-muted-foreground text-sm">
+                No jobs match the current filters.{" "}
+                <button onClick={() => { setFilterType("all"); setFilterRegion("all"); }} className="underline hover:text-foreground">
+                  Clear filters
+                </button>
+              </div>
             )}
-            {jobs.map(job => (
+
+            {filteredJobs.map(job => (
               <Card key={job.id} className="hover:shadow-md transition-shadow">
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex-1 min-w-0 space-y-1.5">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className={`text-lg font-bold tabular-nums ${job.score >= 70 ? "text-green-600" : job.score >= 50 ? "text-yellow-600" : "text-zinc-400"}`}>
                           {job.score}%
                         </span>
                         <h3 className="font-semibold text-sm">{job.title}</h3>
                         {job.company && <Badge variant="outline" className="text-xs">{job.company}</Badge>}
-                        <Badge variant="secondary" className="text-xs">{job.region}</Badge>
-                        <span className={`text-xs px-2 py-0.5 rounded-full border ${sourceColors[job.source] || "bg-zinc-50 text-zinc-600 border-zinc-200"}`}>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* Job type badge */}
+                        <span className={`text-xs px-2 py-0.5 rounded-full border ${JOB_TYPE_COLORS[job.job_type] || JOB_TYPE_COLORS["unknown"]}`}>
+                          {job.job_type === "unknown" ? "type ?" : job.job_type}
+                        </span>
+                        {/* Region */}
+                        <span className="text-xs px-2 py-0.5 rounded-full border bg-zinc-50 text-zinc-600 border-zinc-200">
+                          {job.region || job.region_group}
+                        </span>
+                        {/* Source */}
+                        <span className={`text-xs px-2 py-0.5 rounded-full border ${SOURCE_COLORS[job.source] || "bg-zinc-50 text-zinc-600 border-zinc-200"}`}>
                           {job.source}
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground">{job.reason}</p>
                       <p className="text-xs text-zinc-400 line-clamp-2">{job.description}</p>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-col items-end gap-2 shrink-0">
                       <a href={job.url} target="_blank" rel="noopener noreferrer">
                         <Button variant="outline" size="sm" className="gap-1.5">
                           <ExternalLink className="w-3.5 h-3.5" /> View
