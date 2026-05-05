@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db, SessionLocal
 from app.api.deps import get_current_user
 from app.models.user import User
@@ -108,16 +108,15 @@ CV: {cv_content[:1500]}
 
 
 def _save_seen_jobs(db: Session, user_id: int, results: list[dict]):
-    """Upsert matched jobs into seen_jobs — ignore duplicates."""
+    """Insert matched jobs into seen_jobs — ignore duplicates."""
     for r in results:
         if not r.get("url"):
             continue
-        stmt = pg_insert(SeenJob).values(
-            user_id=user_id,
-            job_url=r["url"],
-            score=r.get("score", 0),
-        ).on_conflict_do_nothing(index_elements=["user_id", "job_url"])
-        db.execute(stmt)
+        try:
+            db.add(SeenJob(user_id=user_id, job_url=r["url"], score=r.get("score", 0)))
+            db.flush()
+        except IntegrityError:
+            db.rollback()
     db.commit()
 
 
