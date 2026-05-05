@@ -1,0 +1,9 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "jobradar-backend/Dockerfile"
+buildContext = "jobradar-backend"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 60
+restartPolicyType = "on_failure"

@@ -16,6 +16,11 @@ node_modules/
 
 # DB
 postgres_data/
+*.db
+
+# Playwright
+jobradar-frontend/test-results/
+jobradar-frontend/playwright-report/
 
 # OS
 .DS_Store
