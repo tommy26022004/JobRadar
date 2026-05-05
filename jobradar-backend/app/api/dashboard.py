@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.core.database import get_db
 from app.api.deps import get_current_user
-from app.api.discover import _get_ai_client, match_job
+from app.api.discover import _get_ai_client, match_job, SCAN_MODEL
 from app.models.user import User
 from app.models.application import Application
 from app.models.job import Job
@@ -107,10 +107,14 @@ async def get_new_matches(
 
     cv = cvs[0]
     cv_content = cv.content
-    ai_client, ai_model, _ = _get_ai_client(current_user)
+    ai_client, _, _ = _get_ai_client(current_user)
+    ai_model = SCAN_MODEL  # always use fast model for dashboard widget
 
-    # Fetch only 5 per source for speed
-    jobs = await fetch_all_jobs(limit_per_source=5, sources=["wwr", "remoteok", "remotive"])
+    # Fetch 15 per source, pre-filter by CV keywords before AI scoring
+    from app.api.discover import _extract_cv_keywords, _keyword_prefilter
+    cv_keywords = _extract_cv_keywords(cv_content)
+    all_jobs = await fetch_all_jobs(limit_per_source=15, sources=["wwr", "remoteok", "remotive"])
+    jobs = _keyword_prefilter(all_jobs, cv_keywords, max_jobs=30)
 
     # Score in batches of 8 with fast model
     results = []
