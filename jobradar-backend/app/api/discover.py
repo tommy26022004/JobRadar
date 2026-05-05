@@ -64,19 +64,46 @@ def _extract_cv_keywords(cv_content: str) -> set[str]:
     return keywords
 
 
+# Job categories that are clearly unrelated to tech/software
+_NON_TECH_PATTERNS = re.compile(
+    r'\b(graphic design|graphic designer|product design|product designer|ux design|ux designer|ui design|ui designer|visual design|visual designer'
+    r'|civil engineer|mechanical engineer|electrical engineer|structural engineer'
+    r'|water|wastewater|hvac|plumbing|construction'
+    r'|accountant|accounting|bookkeeping|tax|payroll|cpa'
+    r'|sales manager|account executive|business development|revenue'
+    r'|nurse|doctor|physician|medical|healthcare|clinical|dental'
+    r'|lawyer|attorney|legal|paralegal|compliance officer'
+    r'|copywriter|content writer|journalist|editor|social media'
+    r'|recruiter|hr manager|talent acquisition|human resources'
+    r'|customer support|customer service|call center|chat support'
+    r'|supply chain|logistics|warehouse|procurement|purchasing'
+    r'|financial analyst|investment|portfolio|asset management|wealth)\b',
+    re.IGNORECASE,
+)
+
+
 def _keyword_prefilter(jobs: list[RemoteJob], cv_keywords: set[str], max_jobs: int = 80) -> list[RemoteJob]:
     """
-    Score jobs by keyword overlap with CV before AI matching.
-    Jobs with 0 keyword overlap go to the back but are kept up to max_jobs.
+    1. Hard-exclude obviously unrelated job categories.
+    2. Sort remaining by keyword overlap with CV.
+    3. Return top max_jobs.
     """
-    if not cv_keywords:
-        return jobs[:max_jobs]
+    # Step 1: hard exclude non-tech jobs (check title only — fast)
+    relevant = []
+    for job in jobs:
+        if _NON_TECH_PATTERNS.search(job.title):
+            continue
+        relevant.append(job)
 
+    if not cv_keywords or not relevant:
+        return relevant[:max_jobs]
+
+    # Step 2: sort by keyword overlap
     def keyword_score(job: RemoteJob) -> int:
-        text = (job.title + " " + job.description[:1000]).lower()
+        text = (job.title + " " + job.description[:800]).lower()
         return sum(1 for kw in cv_keywords if kw in text)
 
-    scored = sorted(jobs, key=keyword_score, reverse=True)
+    scored = sorted(relevant, key=keyword_score, reverse=True)
     return scored[:max_jobs]
 
 
