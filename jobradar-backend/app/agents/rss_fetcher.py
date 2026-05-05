@@ -14,6 +14,8 @@ WWR_FEEDS = {
 
 REMOTEOK_FEED = "https://remoteok.com/remote-jobs.rss"
 REMOTIVE_FEED = "https://remotive.com/api/remote-jobs"
+JOBICY_FEED = "https://jobicy.com/?feed=job_feed"
+ARBEITNOW_FEED = "https://www.arbeitnow.com/api/job-board-api"
 
 # job_type values
 JOB_TYPE_FULL = "full-time"
@@ -404,13 +406,124 @@ async def _fetch_custom_rss(client: httpx.AsyncClient, url: str, limit: int) -> 
     return jobs
 
 
+async def _fetch_jobicy(client: httpx.AsyncClient, limit: int) -> list[RemoteJob]:
+    """Jobicy RSS feed — standard RSS 2.0 with <job_type> and <job_region> tags."""
+    try:
+        resp = await client.get(JOBICY_FEED, headers={"User-Agent": "JobRadar/1.0"}, timeout=15)
+        resp.raise_for_status()
+    except Exception:
+        return []
+
+    try:
+        root = ET.fromstring(resp.text)
+    except ET.ParseError:
+        return []
+
+    channel = root.find("channel")
+    if channel is None:
+        return []
+
+    jobs = []
+    for item in channel.findall("item")[:limit]:
+        title_el = item.find("title")
+        link_el = item.find("link")
+        desc_el = item.find("description")
+
+        title = (title_el.text or "").strip() if title_el is not None else ""
+        link = (link_el.text or "").strip() if link_el is not None else ""
+        description = _clean_html(desc_el.text or "")[:3000] if desc_el is not None else ""
+
+        # Jobicy uses <job_listing_company> for company name
+        company_el = item.find("job_listing_company")
+        company = (company_el.text or "").strip() if company_el is not None else ""
+        if not company and " at " in title:
+            parts = title.rsplit(" at ", 1)
+            title = parts[0].strip()
+            company = parts[1].strip()
+
+        # <job_listing_region> or <job_listing_job_type>
+        region_el = item.find("job_listing_region")
+        region = (region_el.text or "Worldwide").strip() if region_el is not None else "Worldwide"
+
+        type_el = item.find("job_listing_job_type")
+        raw_type = (type_el.text or "").lower() if type_el is not None else ""
+        type_map = {"full-time": JOB_TYPE_FULL, "part-time": JOB_TYPE_PART,
+                    "contract": JOB_TYPE_CONTRACT, "freelance": JOB_TYPE_FREELANCE}
+        job_type = type_map.get(raw_type, _detect_job_type(title, description))
+
+        guid_el = item.find("guid")
+        job_id = (guid_el.text if guid_el is not None else None) or link
+
+        if not title or not link:
+            continue
+
+        jobs.append(RemoteJob(
+            id=job_id, title=title, company=company, url=link,
+            description=description, region=region, source="Jobicy",
+            job_type=job_type, region_group=_normalize_region_group(region),
+            experience_level=_detect_experience_level(title, description),
+        ))
+
+    return jobs
+
+
+async def _fetch_arbeitnow(client: httpx.AsyncClient, limit: int) -> list[RemoteJob]:
+    """Arbeitnow JSON API — remote-only, English jobs worldwide."""
+    try:
+        resp = await client.get(
+            ARBEITNOW_FEED,
+            params={"remote": "true"},
+            headers={"User-Agent": "JobRadar/1.0"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return []
+
+    jobs = []
+    for item in data.get("data", [])[:limit]:
+        title = item.get("title", "")
+        company = item.get("company_name", "")
+        url = item.get("url", "")
+        description = _clean_html(item.get("description", ""))[:3000]
+        job_id = str(item.get("slug", url))
+        location = item.get("location", "") or "Worldwide"
+        remote = item.get("remote", True)
+        region = "Worldwide" if remote else location
+
+        # Arbeitnow has job_types array
+        raw_types = item.get("job_types", [])
+        raw_type = raw_types[0].lower() if raw_types else ""
+        type_map = {"full-time": JOB_TYPE_FULL, "part-time": JOB_TYPE_PART,
+                    "contract": JOB_TYPE_CONTRACT, "freelance": JOB_TYPE_FREELANCE,
+                    "internship": JOB_TYPE_UNKNOWN}
+        job_type = type_map.get(raw_type, _detect_job_type(title, description))
+        exp_level = EXP_INTERN if raw_type == "internship" else _detect_experience_level(title, description)
+
+        if not title or not url:
+            continue
+
+        jobs.append(RemoteJob(
+            id=job_id, title=title, company=company, url=url,
+            description=description, region=region, source="Arbeitnow",
+            job_type=job_type, region_group=_normalize_region_group(region),
+            experience_level=exp_level,
+        ))
+
+    return jobs
+
+
+ALL_SOURCES = ["wwr", "remoteok", "remotive", "jobicy", "arbeitnow"]
+
+
 async def fetch_all_jobs(
     limit_per_source: int = 50,
     sources: list[str] | None = None,
     custom_urls: list[str] | None = None,
 ) -> list[RemoteJob]:
     if sources is None:
-        sources = ["wwr", "remoteok", "remotive"]
+        sources = ALL_SOURCES
 
     async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
         tasks = []
@@ -424,6 +537,12 @@ async def fetch_all_jobs(
 
         if "remotive" in sources:
             tasks.append(_fetch_remotive(client, limit_per_source))
+
+        if "jobicy" in sources:
+            tasks.append(_fetch_jobicy(client, limit_per_source))
+
+        if "arbeitnow" in sources:
+            tasks.append(_fetch_arbeitnow(client, limit_per_source))
 
         for url in (custom_urls or []):
             tasks.append(_fetch_custom_rss(client, url, limit_per_source))

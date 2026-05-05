@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Briefcase, FileText, LogOut, Plus, Compass, Settings } from "lucide-react";
-
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, logout } = useAuth();
   const router = useRouter();

@@ -8,6 +8,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.core.database import Base
 from app.models import User, CV, Job, Application  # noqa: F401 — required for autogenerate
+from app.models.scan import ScanJob  # noqa: F401
+from app.models.seen_job import SeenJob  # noqa: F401
 
 config = context.config
 
