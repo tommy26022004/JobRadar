@@ -18,7 +18,7 @@ router = APIRouter(prefix="/discover", tags=["discover"])
 client = AsyncGroq(api_key=settings.GROQ_API_KEY)
 
 
-async def match_job(job: RemoteJob, cv_content: str) -> dict:
+async def match_job(job: RemoteJob, cv_content: str, retries: int = 2) -> dict:
     prompt = f"""You are a technical recruiter. Score how well this candidate's CV matches the job.
 
 Job Title: {job.title}
@@ -37,18 +37,23 @@ Return ONLY a JSON object:
 
 No markdown, no explanation."""
 
-    try:
-        resp = await client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-        )
-        text = resp.choices[0].message.content.strip()
-        text = re.sub(r"^```json|^```|```$", "", text, flags=re.MULTILINE).strip()
-        data = json.loads(text)
-        return {"score": int(data.get("score", 0)), "reason": data.get("reason", "")}
-    except Exception:
-        return {"score": 0, "reason": "Could not analyze"}
+    for attempt in range(retries + 1):
+        try:
+            resp = await client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+            )
+            text = resp.choices[0].message.content.strip()
+            text = re.sub(r"^```json|^```|```$", "", text, flags=re.MULTILINE).strip()
+            data = json.loads(text)
+            return {"score": int(data.get("score", 0)), "reason": data.get("reason", "")}
+        except Exception as e:
+            if attempt < retries:
+                # Rate limited — back off before retry
+                await asyncio.sleep(3 * (attempt + 1))
+            else:
+                return {"score": -1, "reason": "Could not analyze"}
 
 
 @router.get("/")
@@ -92,12 +97,15 @@ async def discover(
                 return
 
             results = []
-            batch_size = 5
+            batch_size = 3
             for i in range(0, len(jobs), batch_size):
                 batch = jobs[i:i + batch_size]
                 scores = await asyncio.gather(*[match_job(job, cv_content) for job in batch])
 
                 for job, score_data in zip(batch, scores):
+                    # score -1 means Groq failed even after retries — skip this job
+                    if score_data["score"] == -1:
+                        continue
                     result = {
                         "id": job.id,
                         "title": job.title,
@@ -116,7 +124,7 @@ async def discover(
                     yield f"data: {json.dumps({'event': 'matched', 'job': result})}\n\n"
 
                 if i + batch_size < len(jobs):
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2)
 
             results.sort(key=lambda x: x["score"], reverse=True)
             yield f"data: {json.dumps({'event': 'done', 'results': results})}\n\n"
