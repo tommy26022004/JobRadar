@@ -43,67 +43,52 @@ def _get_ai_client(user: User):
     return AsyncGroq(api_key=settings.GROQ_API_KEY), SCAN_MODEL, "groq"
 
 
-def _extract_cv_keywords(cv_content: str) -> set[str]:
-    """Extract meaningful tech/skill keywords from CV for pre-filtering."""
-    # Common tech keywords to look for
-    tech_patterns = [
-        r'\b(python|javascript|typescript|java|golang|go|rust|ruby|php|swift|kotlin|scala|c\+\+|c#)\b',
-        r'\b(react|vue|angular|nextjs|next\.js|svelte|django|fastapi|flask|express|spring|laravel)\b',
-        r'\b(aws|gcp|azure|docker|kubernetes|k8s|terraform|ansible|ci/cd|devops|linux)\b',
-        r'\b(sql|postgresql|mysql|mongodb|redis|elasticsearch|graphql|rest|api)\b',
-        r'\b(machine learning|ml|ai|data science|nlp|deep learning|tensorflow|pytorch)\b',
-        r'\b(ios|android|mobile|flutter|react native)\b',
-        r'\b(figma|ui|ux|design|product)\b',
-        r'\b(blockchain|web3|solidity)\b',
-    ]
+
+def _extract_cv_domain_words(cv_content: str) -> set[str]:
+    """
+    Extract meaningful domain words from CV — job titles, skills, industries.
+    These represent what the user actually does, used to filter irrelevant jobs.
+    """
     text = cv_content.lower()
-    keywords = set()
-    for pattern in tech_patterns:
-        matches = re.findall(pattern, text)
-        keywords.update(matches)
-    return keywords
+    words: set[str] = set()
 
+    # Job title / role words (2+ chars, skip stop words)
+    stop = {
+        'the', 'and', 'for', 'with', 'this', 'that', 'have', 'from',
+        'are', 'was', 'were', 'has', 'had', 'been', 'will', 'can',
+        'all', 'not', 'but', 'our', 'your', 'their', 'its', 'an',
+        'in', 'on', 'at', 'to', 'of', 'a', 'is', 'i', 'my', 'me',
+        'we', 'by', 'or', 'as', 'be', 'do', 'so', 'if', 'up', 'it',
+        'he', 'she', 'they', 'who', 'what', 'how', 'when', 'where',
+        'also', 'both', 'each', 'than', 'more', 'some', 'any', 'use',
+        'using', 'used', 'work', 'worked', 'working', 'team', 'year',
+        'years', 'month', 'months', 'new', 'good', 'great', 'strong',
+        'experience', 'knowledge', 'skills', 'ability', 'responsible',
+    }
 
-# Job categories that are clearly unrelated to tech/software
-_NON_TECH_PATTERNS = re.compile(
-    r'\b(graphic design|graphic designer|product design|product designer|ux design|ux designer|ui design|ui designer|visual design|visual designer'
-    r'|civil engineer|mechanical engineer|electrical engineer|structural engineer'
-    r'|water|wastewater|hvac|plumbing|construction'
-    r'|accountant|accounting|bookkeeping|tax|payroll|cpa'
-    r'|sales manager|account executive|business development|revenue'
-    r'|nurse|doctor|physician|medical|healthcare|clinical|dental'
-    r'|lawyer|attorney|legal|paralegal|compliance officer'
-    r'|copywriter|content writer|journalist|editor|social media'
-    r'|recruiter|hr manager|talent acquisition|human resources'
-    r'|customer support|customer service|call center|chat support'
-    r'|supply chain|logistics|warehouse|procurement|purchasing'
-    r'|financial analyst|investment|portfolio|asset management|wealth)\b',
-    re.IGNORECASE,
-)
+    # Extract all words 3+ chars that aren't stop words
+    raw = re.findall(r'\b[a-z][a-z0-9+#\.]{2,}\b', text)
+    for w in raw:
+        if w not in stop:
+            words.add(w)
+
+    return words
 
 
 def _keyword_prefilter(jobs: list[RemoteJob], cv_keywords: set[str], max_jobs: int = 80) -> list[RemoteJob]:
     """
-    1. Hard-exclude obviously unrelated job categories.
-    2. Sort remaining by keyword overlap with CV.
-    3. Return top max_jobs.
+    Sort jobs by keyword overlap with CV domain words.
+    Jobs with zero overlap are still kept (up to max_jobs) since RSS titles
+    can be terse — we don't hard-exclude anything.
     """
-    # Step 1: hard exclude non-tech jobs (check title only — fast)
-    relevant = []
-    for job in jobs:
-        if _NON_TECH_PATTERNS.search(job.title):
-            continue
-        relevant.append(job)
+    if not cv_keywords:
+        return jobs[:max_jobs]
 
-    if not cv_keywords or not relevant:
-        return relevant[:max_jobs]
-
-    # Step 2: sort by keyword overlap
     def keyword_score(job: RemoteJob) -> int:
         text = (job.title + " " + job.description[:800]).lower()
-        return sum(1 for kw in cv_keywords if kw in text)
+        return sum(1 for kw in cv_keywords if re.search(r'\b' + re.escape(kw) + r'\b', text))
 
-    scored = sorted(relevant, key=keyword_score, reverse=True)
+    scored = sorted(jobs, key=keyword_score, reverse=True)
     return scored[:max_jobs]
 
 
@@ -151,7 +136,7 @@ async def discover(
 
     cv = next((c for c in cvs if c.id == cv_id), cvs[0])
     cv_content = cv.content
-    cv_keywords = _extract_cv_keywords(cv_content)
+    cv_keywords = _extract_cv_domain_words(cv_content)
     ai_client, ai_model, ai_provider = _get_ai_client(current_user)
 
     async def stream():

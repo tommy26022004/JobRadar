@@ -111,8 +111,8 @@ async def get_new_matches(
     ai_model = SCAN_MODEL  # always use fast model for dashboard widget
 
     # Fetch 15 per source, pre-filter by CV keywords before AI scoring
-    from app.api.discover import _extract_cv_keywords, _keyword_prefilter
-    cv_keywords = _extract_cv_keywords(cv_content)
+    from app.api.discover import _extract_cv_domain_words, _keyword_prefilter
+    cv_keywords = _extract_cv_domain_words(cv_content)
     all_jobs = await fetch_all_jobs(limit_per_source=15, sources=["wwr", "remoteok", "remotive"])
     jobs = _keyword_prefilter(all_jobs, cv_keywords, max_jobs=30)
 
