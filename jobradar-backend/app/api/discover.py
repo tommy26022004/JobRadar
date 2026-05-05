@@ -1,15 +1,17 @@
 import json
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.models.cv import CV
-from app.agents.rss_fetcher import fetch_jobs, RemoteJob
+from app.agents.rss_fetcher import fetch_all_jobs, RemoteJob
 from groq import AsyncGroq
 from app.core.config import settings
+from typing import Annotated
+import re
 
 router = APIRouter(prefix="/discover", tags=["discover"])
 
@@ -42,7 +44,6 @@ No markdown, no explanation."""
             temperature=0.2,
         )
         text = resp.choices[0].message.content.strip()
-        import re
         text = re.sub(r"^```json|^```|```$", "", text, flags=re.MULTILINE).strip()
         data = json.loads(text)
         return {"score": int(data.get("score", 0)), "reason": data.get("reason", "")}
@@ -52,9 +53,10 @@ No markdown, no explanation."""
 
 @router.get("/")
 async def discover(
-    category: str = "programming",
-    limit: int = 20,
     cv_id: int = 0,
+    sources: Annotated[list[str], Query()] = ["wwr", "remoteok", "remotive"],
+    custom_urls: Annotated[list[str], Query()] = [],
+    limit_per_source: int = 50,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -67,14 +69,29 @@ async def discover(
 
     async def stream():
         try:
-            yield f"data: {json.dumps({'event': 'fetching', 'message': 'Fetching jobs from WeWorkRemotely...'})}\n\n"
+            source_labels = {
+                "wwr": "WeWorkRemotely",
+                "remoteok": "RemoteOK",
+                "remotive": "Remotive",
+            }
+            active = [source_labels.get(s, s) for s in sources]
+            if custom_urls:
+                active += [f"Custom ({len(custom_urls)} feed{'s' if len(custom_urls) > 1 else ''})" ]
+            yield f"data: {json.dumps({'event': 'fetching', 'message': f'Fetching jobs from {', '.join(active)}...'})}\n\n"
 
-            jobs = await fetch_jobs(category=category, limit=min(limit, 30))
+            jobs = await fetch_all_jobs(
+                limit_per_source=min(limit_per_source, 50),
+                sources=sources,
+                custom_urls=custom_urls,
+            )
 
-            yield f"data: {json.dumps({'event': 'fetched', 'count': len(jobs), 'message': f'Found {len(jobs)} jobs. Matching with your CV...'})}\n\n"
+            yield f"data: {json.dumps({'event': 'fetched', 'count': len(jobs), 'message': f'Found {len(jobs)} jobs across {len(active)} source(s). Matching with your CV...'})}\n\n"
+
+            if not jobs:
+                yield f"data: {json.dumps({'event': 'done', 'results': []})}\n\n"
+                return
 
             results = []
-            # Process in batches of 5 to avoid rate limiting
             batch_size = 5
             for i in range(0, len(jobs), batch_size):
                 batch = jobs[i:i + batch_size]
@@ -90,15 +107,14 @@ async def discover(
                         "score": score_data["score"],
                         "reason": score_data["reason"],
                         "description": job.description[:500],
+                        "source": job.source,
                     }
                     results.append(result)
                     yield f"data: {json.dumps({'event': 'matched', 'job': result})}\n\n"
 
-                # small delay between batches
                 if i + batch_size < len(jobs):
                     await asyncio.sleep(1)
 
-            # sort and send final ranked list
             results.sort(key=lambda x: x["score"], reverse=True)
             yield f"data: {json.dumps({'event': 'done', 'results': results})}\n\n"
 
