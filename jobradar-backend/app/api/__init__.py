@@ -1,1 +1,1 @@
-from app.api import auth, cvs, jobs, applications
+from app.api import auth, cvs, jobs, applications, analyze
