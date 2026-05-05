@@ -19,6 +19,7 @@ type DiscoveredJob = {
   region: string;
   region_group: string;
   job_type: string;
+  experience_level: string;
   score: number;
   reason: string;
   description: string;
@@ -47,6 +48,16 @@ const REGIONS = [
   { key: "Americas", label: "Americas" },
 ];
 
+const EXP_LEVELS = [
+  { key: "all", label: "All levels" },
+  { key: "intern", label: "Intern" },
+  { key: "entry", label: "Entry / Junior" },
+  { key: "mid", label: "Mid-level" },
+  { key: "senior", label: "Senior" },
+  { key: "manager", label: "Manager+" },
+  { key: "unknown", label: "Not specified" },
+];
+
 const SOURCE_COLORS: Record<string, string> = {
   WeWorkRemotely: "bg-blue-50 text-blue-700 border-blue-200",
   RemoteOK: "bg-green-50 text-green-700 border-green-200",
@@ -59,6 +70,24 @@ const JOB_TYPE_COLORS: Record<string, string> = {
   "contract": "bg-orange-50 text-orange-700 border-orange-200",
   "freelance": "bg-sky-50 text-sky-700 border-sky-200",
   "unknown": "bg-zinc-50 text-zinc-400 border-zinc-200",
+};
+
+const EXP_COLORS: Record<string, string> = {
+  "intern": "bg-pink-50 text-pink-700 border-pink-200",
+  "entry": "bg-violet-50 text-violet-700 border-violet-200",
+  "mid": "bg-blue-50 text-blue-700 border-blue-200",
+  "senior": "bg-rose-50 text-rose-700 border-rose-200",
+  "manager": "bg-red-50 text-red-700 border-red-200",
+  "unknown": "bg-zinc-50 text-zinc-400 border-zinc-200",
+};
+
+const EXP_LABELS: Record<string, string> = {
+  "intern": "Intern",
+  "entry": "Entry/Junior",
+  "mid": "Mid-level",
+  "senior": "Senior",
+  "manager": "Manager+",
+  "unknown": "Level ?",
 };
 
 export default function DiscoverPage() {
@@ -77,6 +106,7 @@ export default function DiscoverPage() {
   // Filters (applied client-side after results arrive)
   const [filterType, setFilterType] = useState("all");
   const [filterRegion, setFilterRegion] = useState("all");
+  const [filterExp, setFilterExp] = useState("all");
   const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
@@ -204,17 +234,29 @@ export default function DiscoverPage() {
       }
       if (filterRegion !== "all") {
         if (filterRegion === "Worldwide") {
-          // show Worldwide + Asia-Pacific (friendly for MY timezone)
           if (job.region_group === "Americas" || job.region_group === "Europe") return false;
         } else {
           if (job.region_group !== filterRegion && job.region_group !== "Worldwide") return false;
         }
       }
+      if (filterExp !== "all") {
+        // "unknown" filter: show only jobs without detected level
+        if (filterExp === "unknown") {
+          if (job.experience_level !== "unknown") return false;
+        } else {
+          // hard filter: hide jobs that are clearly a different level
+          // but keep "unknown" jobs since we can't rule them out
+          if (job.experience_level !== filterExp && job.experience_level !== "unknown") return false;
+        }
+      }
       return true;
     });
-  }, [jobs, filterType, filterRegion]);
+  }, [jobs, filterType, filterRegion, filterExp]);
 
-  const activeFilterCount = (filterType !== "all" ? 1 : 0) + (filterRegion !== "all" ? 1 : 0);
+  const activeFilterCount =
+    (filterType !== "all" ? 1 : 0) +
+    (filterRegion !== "all" ? 1 : 0) +
+    (filterExp !== "all" ? 1 : 0);
 
   if (authLoading || !user) return null;
 
@@ -377,15 +419,37 @@ export default function DiscoverPage() {
                         ))}
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        {filterRegion === "Asia-Pacific" && "Shows Asia-Pacific + Worldwide jobs — timezone-friendly for Malaysia (UTC+8)"}
-                        {filterRegion === "Worldwide" && "Shows Worldwide + Asia-Pacific — excludes Americas/Europe-only roles"}
+                        {filterRegion === "Asia-Pacific" && "Shows Asia-Pacific + Worldwide — timezone-friendly for Malaysia (UTC+8)"}
+                        {filterRegion === "Worldwide" && "Excludes Americas/Europe-only roles"}
                         {filterRegion === "Europe" && "Shows Europe + Worldwide jobs"}
                         {filterRegion === "Americas" && "Shows Americas + Worldwide jobs"}
                       </p>
                     </div>
                   </div>
+
+                  {/* Experience level filter — full width row */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Experience Level</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {EXP_LEVELS.map(e => (
+                        <button key={e.key} onClick={() => setFilterExp(e.key)}
+                          className={`px-3 py-1 rounded-full text-xs border transition-colors ${filterExp === e.key ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400"}`}>
+                          {e.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {filterExp === "entry" && "Shows Entry/Junior + jobs without a specified level (may still be entry-friendly)"}
+                      {filterExp === "intern" && "Shows internship and trainee positions only"}
+                      {filterExp === "mid" && "Shows Mid-level + unspecified level jobs"}
+                      {filterExp === "senior" && "Shows Senior + unspecified level jobs"}
+                      {filterExp === "manager" && "Shows Manager/Director/VP level only"}
+                      {filterExp === "unknown" && "Shows only jobs where experience level couldn't be detected — check manually"}
+                    </p>
+                  </div>
+
                   {activeFilterCount > 0 && (
-                    <button onClick={() => { setFilterType("all"); setFilterRegion("all"); }}
+                    <button onClick={() => { setFilterType("all"); setFilterRegion("all"); setFilterExp("all"); }}
                       className="text-xs text-muted-foreground hover:text-foreground underline">
                       Clear all filters
                     </button>
@@ -416,6 +480,10 @@ export default function DiscoverPage() {
                         {job.company && <Badge variant="outline" className="text-xs">{job.company}</Badge>}
                       </div>
                       <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* Experience level badge */}
+                        <span className={`text-xs px-2 py-0.5 rounded-full border ${EXP_COLORS[job.experience_level] || EXP_COLORS["unknown"]}`}>
+                          {EXP_LABELS[job.experience_level] || "Level ?"}
+                        </span>
                         {/* Job type badge */}
                         <span className={`text-xs px-2 py-0.5 rounded-full border ${JOB_TYPE_COLORS[job.job_type] || JOB_TYPE_COLORS["unknown"]}`}>
                           {job.job_type === "unknown" ? "type ?" : job.job_type}

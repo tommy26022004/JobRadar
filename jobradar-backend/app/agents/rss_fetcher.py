@@ -28,6 +28,14 @@ REGION_EUROPE = "Europe"
 REGION_AMERICAS = "Americas"
 REGION_WORLDWIDE = "Worldwide"
 
+# experience_level values
+EXP_INTERN = "intern"
+EXP_ENTRY = "entry"
+EXP_MID = "mid"
+EXP_SENIOR = "senior"
+EXP_MANAGER = "manager"
+EXP_UNKNOWN = "unknown"
+
 
 @dataclass
 class RemoteJob:
@@ -38,8 +46,9 @@ class RemoteJob:
     description: str
     region: str
     source: str = "WeWorkRemotely"
-    job_type: str = JOB_TYPE_UNKNOWN   # full-time / part-time / contract / freelance / unknown
-    region_group: str = REGION_WORLDWIDE  # Asia-Pacific / Europe / Americas / Worldwide
+    job_type: str = JOB_TYPE_UNKNOWN
+    region_group: str = REGION_WORLDWIDE
+    experience_level: str = EXP_UNKNOWN
 
 
 def _clean_html(text: str) -> str:
@@ -51,6 +60,58 @@ def _clean_html(text: str) -> str:
     text = re.sub(r"&#\d+;", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
+
+def _detect_experience_level(title: str, description: str) -> str:
+    """Detect experience level from title and first 800 chars of description."""
+    # Title is most reliable signal — check it first with higher priority
+    t = title.lower()
+
+    # Manager+ — check title only (avoid false positives in JD body)
+    if re.search(r"\b(vp|vice president|director|head of|principal|staff engineer|distinguished)\b", t):
+        return EXP_MANAGER
+    if re.search(r"\b(engineering manager|product manager|people manager)\b", t):
+        return EXP_MANAGER
+
+    # Senior — title first
+    if re.search(r"\b(senior|sr\.?|lead|architect|tech lead|team lead)\b", t):
+        return EXP_SENIOR
+
+    # Intern — title first
+    if re.search(r"\b(intern|internship|trainee|graduate program|apprentice)\b", t):
+        return EXP_INTERN
+
+    # Entry/Junior — title first
+    if re.search(r"\b(junior|jr\.?|entry.?level|associate|graduate|new grad|fresh)\b", t):
+        return EXP_ENTRY
+
+    # Mid — title first
+    if re.search(r"\b(mid.?level|mid.?senior|intermediate)\b", t):
+        return EXP_MID
+
+    # Fall back to description scan for year requirements
+    desc = description[:800].lower()
+    year_match = re.search(r"(\d+)\+?\s*(?:to\s*\d+\s*)?years?\s*(?:of\s*)?(?:experience|exp)", desc)
+    if year_match:
+        yrs = int(year_match.group(1))
+        if yrs >= 10:
+            return EXP_MANAGER
+        if yrs >= 5:
+            return EXP_SENIOR
+        if yrs >= 2:
+            return EXP_MID
+        if yrs <= 1:
+            return EXP_ENTRY
+
+    # Description keywords as last resort
+    if re.search(r"\b(senior|sr\.?|lead engineer|tech lead)\b", desc):
+        return EXP_SENIOR
+    if re.search(r"\b(junior|jr\.?|entry.?level|new grad)\b", desc):
+        return EXP_ENTRY
+    if re.search(r"\b(intern|internship)\b", desc):
+        return EXP_INTERN
+
+    return EXP_UNKNOWN
 
 
 def _detect_job_type(title: str, description: str) -> str:
@@ -153,6 +214,7 @@ async def _fetch_wwr_feed(client: httpx.AsyncClient, url: str, limit: int) -> li
             source="WeWorkRemotely",
             job_type=_detect_job_type(title, description),
             region_group=_normalize_region_group(region),
+            experience_level=_detect_experience_level(title, description),
         ))
 
     return jobs
@@ -225,6 +287,7 @@ async def _fetch_remoteok(client: httpx.AsyncClient, limit: int) -> list[RemoteJ
             source="RemoteOK",
             job_type=job_type,
             region_group=_normalize_region_group(region),
+            experience_level=_detect_experience_level(title, description),
         ))
 
     return jobs
@@ -270,6 +333,7 @@ async def _fetch_remotive(client: httpx.AsyncClient, limit: int) -> list[RemoteJ
             source="Remotive",
             job_type=job_type,
             region_group=_normalize_region_group(region),
+            experience_level=_detect_experience_level(title, description),
         ))
 
     return jobs
@@ -334,6 +398,7 @@ async def _fetch_custom_rss(client: httpx.AsyncClient, url: str, limit: int) -> 
             source=url,
             job_type=_detect_job_type(title, description),
             region_group=REGION_WORLDWIDE,
+            experience_level=_detect_experience_level(title, description),
         ))
 
     return jobs
