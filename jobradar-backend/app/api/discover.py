@@ -15,10 +15,35 @@ import re
 
 router = APIRouter(prefix="/discover", tags=["discover"])
 
-client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+
+def _get_ai_client(user: User):
+    """Return (client, model, provider) using user's key if set, else server default."""
+    provider = user.ai_provider or "groq"
+    api_key = user.ai_api_key or None
+
+    if provider == "groq" or not api_key:
+        key = api_key or settings.GROQ_API_KEY
+        model = user.ai_model or "llama-3.3-70b-versatile"
+        return AsyncGroq(api_key=key), model, "groq"
+
+    if provider == "gemini":
+        # Use Groq-compatible wrapper isn't available — fall back to groq server key
+        # Full Gemini support requires google-generativeai which has httpx conflicts
+        # For now: use user's groq key if they set provider=gemini accidentally
+        key = api_key or settings.GROQ_API_KEY
+        model = user.ai_model or "llama-3.3-70b-versatile"
+        return AsyncGroq(api_key=key), model, "groq"
+
+    if provider == "openai":
+        from openai import AsyncOpenAI
+        model = user.ai_model or "gpt-4o-mini"
+        return AsyncOpenAI(api_key=api_key), model, "openai"
+
+    # fallback
+    return AsyncGroq(api_key=settings.GROQ_API_KEY), "llama-3.3-70b-versatile", "groq"
 
 
-async def match_job(job: RemoteJob, cv_content: str, retries: int = 2) -> dict:
+async def match_job(job: RemoteJob, cv_content: str, client, model: str, retries: int = 2) -> dict:
     prompt = f"""You are a technical recruiter. Score how well this candidate's CV matches the job.
 
 Job Title: {job.title}
@@ -40,7 +65,7 @@ No markdown, no explanation."""
     for attempt in range(retries + 1):
         try:
             resp = await client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
             )
@@ -61,7 +86,7 @@ async def discover(
     cv_id: int = 0,
     sources: Annotated[list[str], Query()] = ["wwr", "remoteok", "remotive"],
     custom_urls: Annotated[list[str], Query()] = [],
-    limit_per_source: int = 50,
+    limit_per_source: int = 15,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -71,6 +96,7 @@ async def discover(
 
     cv = next((c for c in cvs if c.id == cv_id), cvs[0])
     cv_content = cv.content
+    ai_client, ai_model, ai_provider = _get_ai_client(current_user)
 
     async def stream():
         try:
@@ -100,7 +126,7 @@ async def discover(
             batch_size = 3
             for i in range(0, len(jobs), batch_size):
                 batch = jobs[i:i + batch_size]
-                scores = await asyncio.gather(*[match_job(job, cv_content) for job in batch])
+                scores = await asyncio.gather(*[match_job(job, cv_content, ai_client, ai_model) for job in batch])
 
                 for job, score_data in zip(batch, scores):
                     # score -1 means Groq failed even after retries — skip this job
@@ -124,7 +150,7 @@ async def discover(
                     yield f"data: {json.dumps({'event': 'matched', 'job': result})}\n\n"
 
                 if i + batch_size < len(jobs):
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(4)
 
             results.sort(key=lambda x: x["score"], reverse=True)
             yield f"data: {json.dumps({'event': 'done', 'results': results})}\n\n"

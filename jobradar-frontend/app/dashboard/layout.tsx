@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import { Briefcase, FileText, LogOut, Plus, Compass } from "lucide-react";
+import { Briefcase, FileText, LogOut, Plus, Compass, Settings } from "lucide-react";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, logout } = useAuth();
@@ -30,6 +30,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </Link>
             <Link href="/discover" className="flex items-center gap-1.5 hover:text-foreground transition-colors">
               <Compass className="w-4 h-4" /> Discover
+            </Link>
+            <Link href="/settings" className="flex items-center gap-1.5 hover:text-foreground transition-colors">
+              <Settings className="w-4 h-4" /> Settings
             </Link>
           </nav>
         </div>

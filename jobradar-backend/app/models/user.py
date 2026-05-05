@@ -13,6 +13,9 @@ class User(Base):
     full_name = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    ai_provider = Column(String, default="groq")  # groq / gemini / openai
+    ai_api_key = Column(String, nullable=True)     # user's own key, overrides server default
+    ai_model = Column(String, nullable=True)       # optional model override
 
     cvs = relationship("CV", back_populates="user", cascade="all, delete-orphan")
     jobs = relationship("Job", back_populates="user", cascade="all, delete-orphan")
