@@ -112,9 +112,9 @@ async def get_new_matches(
     # Fetch only 5 per source for speed
     jobs = await fetch_all_jobs(limit_per_source=5, sources=["wwr", "remoteok", "remotive"])
 
-    # Score in batches of 3
+    # Score in batches of 8 with fast model
     results = []
-    batch_size = 3
+    batch_size = 8
     for i in range(0, len(jobs), batch_size):
         batch = jobs[i:i + batch_size]
         scores = await asyncio.gather(*[match_job(j, cv_content, ai_client, ai_model) for j in batch])
@@ -130,7 +130,7 @@ async def get_new_matches(
                     "experience_level": job.experience_level,
                 })
         if i + batch_size < len(jobs):
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
 
     results.sort(key=lambda x: x["score"], reverse=True)
     top5 = [r for r in results if r["score"] >= 50][:5]
