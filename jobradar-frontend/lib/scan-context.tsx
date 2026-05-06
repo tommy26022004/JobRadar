@@ -33,6 +33,7 @@ type ScanContextType = {
   startHardScanPolling: (scan_id: string) => void;
   // auto scan — background only, shown in ScanToast
   autoScan: ScanState;
+  autoScanStatus: "idle" | "scanning" | "cached" | "no_cv" | "done";
   // feed — accumulated daily matches
   feed: FeedState;
   refreshFeed: () => void;
@@ -47,6 +48,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [hardScan, setHardScan] = useState<ScanState>(IDLE);
   const [autoScan, setAutoScan] = useState<ScanState>(IDLE);
+  const [autoScanStatus, setAutoScanStatus] = useState<"idle" | "scanning" | "cached" | "no_cv" | "done">("idle");
   const [feed, setFeed] = useState<FeedState>(EMPTY_FEED);
   const hardPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -85,6 +87,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         setAutoScan({ scan_id, status: data.status, total: data.total, matched: data.matched, message: data.message, results: data.results });
         if (data.status === "done" || data.status === "error") {
           stopAutoPoll();
+          setAutoScanStatus("done");
           fetch(`${BASE}/discover/feed`, { headers: authHeader() })
             .then(r => r.json()).then(setFeed).catch(() => {});
         }
@@ -119,8 +122,13 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
           .then(r => r.json())
           .then(data => {
             if (data.status === "scanning" && data.scan_id) {
+              setAutoScanStatus("scanning");
               setAutoScan(prev => ({ ...prev, status: "running", message: "Checking for new jobs..." }));
               startAutoScanPolling(data.scan_id);
+            } else if (data.status === "cached") {
+              setAutoScanStatus("cached");
+            } else if (data.status === "no_cv") {
+              setAutoScanStatus("no_cv");
             }
           }).catch(() => {});
       }).catch(() => {});
@@ -132,7 +140,7 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => () => { stopHardPoll(); stopAutoPoll(); }, [stopHardPoll, stopAutoPoll]);
 
   return (
-    <ScanContext.Provider value={{ hardScan, setHardScan, startHardScanPolling, autoScan, feed, refreshFeed }}>
+    <ScanContext.Provider value={{ hardScan, setHardScan, startHardScanPolling, autoScan, autoScanStatus, feed, refreshFeed }}>
       {children}
     </ScanContext.Provider>
   );

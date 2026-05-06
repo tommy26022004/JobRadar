@@ -122,6 +122,7 @@ export default function DashboardPage() {
   const feedJobs = feed.jobs;
   const isAutoScanning = autoScan.status === "running";
   const newCount = feed.new_count;
+  const { autoScanStatus } = useScan();
 
   return (
     <div className="space-y-6">
@@ -281,20 +282,30 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Empty state — no scan yet */}
+          {/* Empty state */}
           {!isAutoScanning && feedJobs.length === 0 && (
             <Card className="border-dashed">
               <CardContent className="p-6 text-center space-y-2">
                 <Sparkles className="w-6 h-6 text-muted-foreground mx-auto" />
-                <p className="text-sm text-muted-foreground">
-                  Auto-scan will find matching jobs for you
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Runs automatically every 4 hours when you're online
-                </p>
-                <Link href="/discover" className="text-xs text-primary hover:underline block">
-                  Or run a deep scan on Discover →
-                </Link>
+                {autoScanStatus === "no_cv" ? (
+                  <>
+                    <p className="text-sm text-muted-foreground">Add a CV to enable auto-scan</p>
+                    <p className="text-xs text-muted-foreground">Auto-scan needs your CV to find matching jobs</p>
+                    <Link href="/cvs" className="text-xs text-primary hover:underline block">Upload your CV →</Link>
+                  </>
+                ) : autoScanStatus === "cached" ? (
+                  <>
+                    <p className="text-sm text-muted-foreground">No new jobs found yet today</p>
+                    <p className="text-xs text-muted-foreground">Next scan in {feed.next_scan_in_minutes ?? "—"}m</p>
+                    <Link href="/discover" className="text-xs text-primary hover:underline block">Run a deep scan on Discover →</Link>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-muted-foreground">Auto-scan will find matching jobs for you</p>
+                    <p className="text-xs text-muted-foreground">Runs automatically every 4 hours when you're online</p>
+                    <Link href="/discover" className="text-xs text-primary hover:underline block">Or run a deep scan on Discover →</Link>
+                  </>
+                )}
               </CardContent>
             </Card>
           )}
