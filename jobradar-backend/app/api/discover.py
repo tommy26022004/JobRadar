@@ -79,14 +79,26 @@ def _keyword_prefilter(jobs: list[RemoteJob], cv_keywords: set[str], max_jobs: i
 
 
 async def match_job(job: RemoteJob, cv_content: str, client, model: str, retries: int = 1) -> dict:
-    prompt = f"""Score how well this CV matches the job. Return ONLY JSON.
+    prompt = f"""You are a strict recruiter scoring CV-to-job fit. Be harsh and realistic.
 
-Job: {job.title} at {job.company}
-Description: {job.description[:1500]}
+SCORING RUBRIC:
+- 85-100: Near-perfect match. Same role title, 80%+ of required skills present, right seniority.
+- 70-84: Strong match. Core skills align, minor gaps only (1-2 missing tools).
+- 50-69: Partial match. Related field but missing key requirements or wrong seniority.
+- 30-49: Weak match. Different domain but some transferable skills.
+- 0-29: Poor match. Wrong field entirely, most requirements missing.
 
-CV: {cv_content[:1500]}
+IMPORTANT: If the job requires skills/domain completely absent from the CV, score MUST be below 40.
+Example: Marketing CV vs Software Engineering job = 10-25. DevOps CV vs Sales job = 5-20.
 
-{{"score": <0-100>, "reason": "<one sentence>"}}"""
+Job Title: {job.title}
+Company: {job.company}
+Job Description: {job.description[:1200]}
+
+Candidate CV: {cv_content[:1200]}
+
+Return ONLY valid JSON, no explanation outside JSON:
+{{"score": <integer 0-100>, "reason": "<one sentence explaining the score>"}}"""
 
     for attempt in range(retries + 1):
         try:
