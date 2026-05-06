@@ -85,6 +85,7 @@ export default function DiscoverPage() {
   const [filterType, setFilterType] = useState("all");
   const [filterRegion, setFilterRegion] = useState("all");
   const [filterExp, setFilterExp] = useState("all");
+  const [minScore, setMinScore] = useState(40);
   const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
@@ -161,6 +162,7 @@ export default function DiscoverPage() {
 
   const filteredJobs = useMemo(() => {
     return scan.results.filter(job => {
+      if (job.score < minScore) return false;
       if (filterType !== "all") {
         if (filterType === "full-time" && job.job_type !== "full-time" && job.job_type !== "unknown") return false;
         if (filterType !== "full-time" && job.job_type !== filterType) return false;
@@ -175,9 +177,9 @@ export default function DiscoverPage() {
       }
       return true;
     });
-  }, [scan.results, filterType, filterRegion, filterExp]);
+  }, [scan.results, filterType, filterRegion, filterExp, minScore]);
 
-  const activeFilterCount = (filterType !== "all" ? 1 : 0) + (filterRegion !== "all" ? 1 : 0) + (filterExp !== "all" ? 1 : 0);
+  const activeFilterCount = (filterType !== "all" ? 1 : 0) + (filterRegion !== "all" ? 1 : 0) + (filterExp !== "all" ? 1 : 0) + (minScore !== 40 ? 1 : 0);
 
   if (authLoading || !user) return null;
 
@@ -362,8 +364,23 @@ export default function DiscoverPage() {
                       ))}
                     </div>
                   </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Min Match Score</p>
+                      <span className={`text-sm font-bold ${minScore >= 70 ? "text-green-600" : minScore >= 50 ? "text-yellow-600" : "text-zinc-500"}`}>{minScore}%</span>
+                    </div>
+                    <input type="range" min={0} max={90} step={5} value={minScore}
+                      onChange={e => setMinScore(Number(e.target.value))}
+                      className="w-full accent-primary" />
+                    <div className="flex justify-between text-[10px] text-muted-foreground">
+                      <span>0% (show all)</span>
+                      <span>50% (good)</span>
+                      <span>70% (strong)</span>
+                      <span>90%</span>
+                    </div>
+                  </div>
                   {activeFilterCount > 0 && (
-                    <button onClick={() => { setFilterType("all"); setFilterRegion("all"); setFilterExp("all"); }}
+                    <button onClick={() => { setFilterType("all"); setFilterRegion("all"); setFilterExp("all"); setMinScore(40); }}
                       className="text-xs text-muted-foreground hover:text-foreground underline">
                       Clear all filters
                     </button>
@@ -372,10 +389,13 @@ export default function DiscoverPage() {
               </Card>
             )}
 
-            {filteredJobs.length === 0 && (
+            {scan.status === "done" && filteredJobs.length === 0 && scan.results.length > 0 && (
               <div className="text-center py-8 text-muted-foreground text-sm">
                 No jobs match current filters.{" "}
-                <button onClick={() => { setFilterType("all"); setFilterRegion("all"); setFilterExp("all"); }} className="underline hover:text-foreground">Clear filters</button>
+                <button onClick={() => { setFilterType("all"); setFilterRegion("all"); setFilterExp("all"); setMinScore(40); }} className="underline hover:text-foreground">Clear filters</button>
+                {minScore > 0 && (
+                  <span> or <button onClick={() => setMinScore(0)} className="underline hover:text-foreground">show all scores</button></span>
+                )}
               </div>
             )}
 
