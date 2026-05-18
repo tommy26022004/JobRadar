@@ -32,7 +32,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="flex items-center gap-6">
           <Link href="/dashboard" className="font-bold text-lg tracking-tight">JobRadar</Link>
           <nav className="flex items-center gap-4 text-sm text-muted-foreground">
-            <Link href="/dashboard" className="flex items-center gap-1.5 hover:text-foreground transition-colors">
+            <Link href="/jobs" className="flex items-center gap-1.5 hover:text-foreground transition-colors">
               <Briefcase className="w-4 h-4" /> Jobs
             </Link>
             <Link href="/cvs" className="flex items-center gap-1.5 hover:text-foreground transition-colors">

@@ -306,16 +306,10 @@ export default function DashboardPage() {
         <StatCard icon={<Award className="w-4 h-4 text-green-600" />} label="Avg Match Score"
           value={stats?.avg_score ? `${stats.avg_score}%` : "—"}
           sub="across all tracked jobs" color="bg-green-100 dark:bg-green-900/40" />
-        <Card className="border-border/60">
-          <CardContent className="p-4 space-y-2">
-            <p className="text-xs text-muted-foreground font-medium tracking-wide uppercase">Pipeline</p>
-            {stats?.by_status ? (
-              <FunnelChart byStatus={stats.by_status} />
-            ) : (
-              <p className="text-xs text-muted-foreground">No data yet</p>
-            )}
-          </CardContent>
-        </Card>
+        <StatCard icon={<TrendingUp className="w-4 h-4 text-violet-600" />} label="Offer / Interview"
+          value={`${stats?.by_status.offer ?? 0} / ${stats?.by_status.interview ?? 0}`}
+          sub={`${stats?.by_status.rejected ?? 0} rejected · ${stats?.by_status.applied ?? 0} applied`}
+          color="bg-violet-100 dark:bg-violet-900/40" />
         <Card>
           <CardContent className="p-4 space-y-2">
             <div className="flex items-center gap-2">
