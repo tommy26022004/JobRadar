@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { useScan } from "@/lib/scan-context";
-import { Loader2, Plus, Briefcase, TrendingUp, Award, Zap, ExternalLink, RefreshCw, Sparkles } from "lucide-react";
+import { Loader2, Plus, Briefcase, TrendingUp, Award, Zap, ExternalLink, RefreshCw, Sparkles, CalendarClock } from "lucide-react";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -116,6 +116,55 @@ function QuotaBar({ used, total, label }: { used: number; total: number; label: 
   );
 }
 
+function formatCountdown(dateStr: string): { label: string; urgent: boolean } {
+  const diff = new Date(dateStr).getTime() - Date.now();
+  if (diff < 0) return { label: "Past", urgent: false };
+  const hours = Math.floor(diff / 3600000);
+  if (hours < 1) return { label: "< 1h", urgent: true };
+  if (hours < 24) return { label: `${hours}h`, urgent: hours < 6 };
+  const days = Math.floor(hours / 24);
+  if (days === 1) return { label: "Tomorrow", urgent: false };
+  return { label: `${days}d`, urgent: false };
+}
+
+function UpcomingInterviews({ apps }: { apps: AppWithJob[] }) {
+  const upcoming = apps
+    .filter(a => a.interview_at && new Date(a.interview_at) > new Date())
+    .sort((a, b) => new Date(a.interview_at!).getTime() - new Date(b.interview_at!).getTime())
+    .slice(0, 3);
+
+  if (upcoming.length === 0) return null;
+
+  return (
+    <div className="shrink-0">
+      <div className="flex items-center gap-2 mb-2">
+        <CalendarClock className="w-4 h-4 text-yellow-500" />
+        <h2 className="font-semibold text-sm">Upcoming Interviews</h2>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        {upcoming.map(app => {
+          const { label, urgent } = formatCountdown(app.interview_at!);
+          return (
+            <div key={app.id} onClick={() => window.location.href = `/jobs/${app.job_id}`}
+              className="flex items-center gap-3 p-3 rounded-lg border bg-card border-border/60 hover:border-yellow-500/50 hover:shadow-sm cursor-pointer transition-all">
+              <div className={`shrink-0 px-2 py-1 rounded-md text-xs font-bold tabular-nums ${urgent ? "bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400" : "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400"}`}>
+                {label}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold truncate">{app.job?.parsed_title || app.job?.title}</p>
+                <p className="text-[11px] text-muted-foreground truncate">{app.job?.parsed_company || app.job?.company}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {new Date(app.interview_at!).toLocaleString("vi-VN", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { feed, refreshFeed, autoScan, autoScanStatus } = useScan();
@@ -215,6 +264,9 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Upcoming Interviews */}
+      <UpcomingInterviews apps={apps} />
 
       {/* Kanban + New Matches */}
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 flex-1 min-h-0">
