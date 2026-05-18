@@ -87,6 +87,8 @@ export type Application = {
   match_score: number | null;
   ai_analysis: string | null;
   cv_suggestions: string | null;
+  interview_at: string | null;
+  notes: string | null;
   created_at: string;
   updated_at: string | null;
 };

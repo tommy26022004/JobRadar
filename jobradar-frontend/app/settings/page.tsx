@@ -37,6 +37,8 @@ export default function SettingsPage() {
   const [apiKey, setApiKey] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [saving, setSaving] = useState(false);
+  const [emailNotifications, setEmailNotifications] = useState(true);
+  const [savingNotif, setSavingNotif] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
@@ -50,11 +52,13 @@ export default function SettingsPage() {
     Promise.all([
       fetch(`${BASE}/settings/ai/providers`, { headers: h }).then(r => r.json()),
       fetch(`${BASE}/settings/ai`, { headers: h }).then(r => r.json()),
-    ]).then(([provs, curr]) => {
+      fetch(`${BASE}/settings/notifications`, { headers: h }).then(r => r.json()),
+    ]).then(([provs, curr, notif]) => {
       setProviders(provs);
       setCurrent(curr);
       setSelectedProvider(curr.provider || "groq");
       setSelectedModel(curr.model || provs[curr.provider]?.default_model || "");
+      setEmailNotifications(notif.email_notifications ?? true);
     });
   }, [user]);
 
@@ -99,13 +103,32 @@ export default function SettingsPage() {
     setCurrent(prev => prev ? { ...prev, has_custom_key: false, key_preview: null, provider: "groq" } : prev);
   };
 
+  const handleToggleNotifications = async (enabled: boolean) => {
+    setEmailNotifications(enabled);
+    setSavingNotif(true);
+    try {
+      const token = localStorage.getItem("access_token");
+      await fetch(`${BASE}/settings/notifications`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email_notifications: enabled }),
+      });
+      toast.success(enabled ? "Email notifications enabled" : "Email notifications disabled");
+    } catch {
+      toast.error("Failed to update notification settings");
+      setEmailNotifications(!enabled);
+    } finally {
+      setSavingNotif(false);
+    }
+  };
+
   if (authLoading || !user) return null;
 
   const activeProvider = providers[selectedProvider];
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <header className="border-b bg-white px-6 py-3 flex items-center justify-between">
+    <div className="min-h-screen bg-background">
+      <header className="border-b bg-card px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-6">
           <Link href="/dashboard" className="font-bold text-lg tracking-tight">JobRadar</Link>
           <nav className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -180,7 +203,7 @@ export default function SettingsPage() {
             <div className="grid grid-cols-3 gap-2">
               {Object.entries(providers).map(([key, p]) => (
                 <button key={key} onClick={() => setSelectedProvider(key)}
-                  className={`p-3 rounded-lg border text-left transition-colors ${selectedProvider === key ? "border-primary bg-primary/5" : "border-zinc-200 bg-white hover:border-zinc-400"}`}>
+                  className={`p-3 rounded-lg border text-left transition-colors ${selectedProvider === key ? "border-primary bg-primary/10" : "border-border bg-card hover:border-muted-foreground"}`}>
                   <div className="font-medium text-sm">{p.name}</div>
                   <div className="flex items-center gap-1 mt-1">
                     {p.free
@@ -199,7 +222,7 @@ export default function SettingsPage() {
                   <div className="flex flex-wrap gap-2">
                     {activeProvider.models.map(m => (
                       <button key={m} onClick={() => setSelectedModel(m)}
-                        className={`px-3 py-1.5 rounded-full text-xs border transition-colors ${selectedModel === m ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400"}`}>
+                        className={`px-3 py-1.5 rounded-full text-xs border transition-colors ${selectedModel === m ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-muted-foreground"}`}>
                         {m}
                         {m === activeProvider.default_model && (
                           <span className="ml-1 text-zinc-400">(default)</span>
@@ -237,6 +260,34 @@ export default function SettingsPage() {
                   {saving ? "Saving..." : `Save ${activeProvider.name} Key`}
                 </Button>
               </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Notifications */}
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Notifications</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Email alerts for strong matches</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Get emailed when JobRadar finds jobs with score ≥75% during auto-scan.
+                  {" "}Sent to <span className="font-medium">{user.email}</span>.
+                </p>
+              </div>
+              <button
+                disabled={savingNotif}
+                onClick={() => handleToggleNotifications(!emailNotifications)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${emailNotifications ? "bg-primary" : "bg-muted"}`}
+              >
+                <span className={`inline-block h-5 w-5 transform rounded-full bg-white dark:bg-zinc-200 shadow transition duration-200 ${emailNotifications ? "translate-x-5" : "translate-x-0"}`} />
+              </button>
+            </div>
+            {!emailNotifications && (
+              <p className="text-xs text-amber-600 bg-amber-50 rounded px-2 py-1">
+                Notifications off — you won't receive match alerts by email.
+              </p>
             )}
           </CardContent>
         </Card>

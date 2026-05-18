@@ -62,8 +62,8 @@ export default function CVsPage() {
   if (authLoading || !user) return null;
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <header className="border-b bg-white px-6 py-3 flex items-center justify-between">
+    <div className="min-h-screen bg-background">
+      <header className="border-b bg-card px-6 py-3 flex items-center justify-between">
         <Link href="/dashboard" className="font-bold text-lg tracking-tight">JobRadar</Link>
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted-foreground">{user.full_name || user.email}</span>
@@ -128,7 +128,7 @@ export default function CVsPage() {
                         <p className="text-xs text-muted-foreground">{cv.content.length} chars · {new Date(cv.created_at).toLocaleDateString()}</p>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        <button onClick={() => { setEditingId(cv.id); setEditName(cv.name); }} className="p-1.5 hover:bg-zinc-100 rounded">
+                        <button onClick={() => { setEditingId(cv.id); setEditName(cv.name); }} className="p-1.5 hover:bg-muted rounded">
                           <Pencil className="w-4 h-4 text-muted-foreground" />
                         </button>
                         <button onClick={() => handleDelete(cv.id)} className="p-1.5 hover:bg-red-50 rounded">

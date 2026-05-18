@@ -1,9 +1,11 @@
 import json
 import re
 import asyncio
-from fastapi import APIRouter, Depends
+from datetime import date, timedelta
+from typing import List, Optional
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, cast, Date
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.api.discover import _get_ai_client, match_job, SCAN_MODEL
@@ -11,6 +13,7 @@ from app.models.user import User
 from app.models.application import Application
 from app.models.job import Job
 from app.models.cv import CV
+from app.models.seen_job import SeenJob
 from app.agents.rss_fetcher import fetch_all_jobs
 from groq import AsyncGroq
 from app.core.config import settings
@@ -140,3 +143,160 @@ async def get_new_matches(
     top5 = [r for r in results if r["score"] >= 50][:5]
 
     return {"matches": top5, "total_scanned": len(results)}
+
+
+# ---------------------------------------------------------------------------
+# Category detection helpers
+# ---------------------------------------------------------------------------
+
+_CATEGORY_KEYWORDS: list[tuple[str, list[str]]] = [
+    ("Full Stack",  ["fullstack", "full stack", "full-stack"]),
+    ("Frontend",    ["frontend", "front-end", "react", "vue", "angular", "next.js", "ui developer", "ui engineer"]),
+    ("Backend",     ["backend", "back-end", "node", "python", "django", "fastapi", "rails", "java", "golang", "go developer", "software engineer", "software developer", "api developer", "api engineer"]),
+    ("DevOps",      ["devops", "sre", "infrastructure", "kubernetes", "docker", "cloud", "aws", "gcp", "azure", "platform engineer", "site reliability"]),
+    ("Data / ML",   ["data", "ml", "machine learning", "ai engineer", "analyst", "scientist", "nlp", "llm", "deep learning"]),
+    ("Mobile",      ["mobile", "ios", "android", "flutter", "react native", "swift", "kotlin"]),
+    ("Design",      ["design", "ui/ux", "ux", "figma", "product design", "graphic"]),
+    ("Marketing",   ["marketing", "growth", "seo", "social media", "content", "copywriter", "brand"]),
+    ("Product",     ["product manager", "product owner", "scrum master", "agile"]),
+    ("Sales",       ["sales", "account executive", "business development", "account manager"]),
+]
+
+
+def _detect_category(title: str) -> str:
+    """Return the first matching category or 'Other'."""
+    if not title:
+        return "Other"
+    lower = title.lower()
+    for category, keywords in _CATEGORY_KEYWORDS:
+        for kw in keywords:
+            if kw in lower:
+                return category
+    return "Other"
+
+
+@router.get("/job-categories")
+async def get_job_categories(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all unique job categories the current user has seen."""
+    rows = (
+        db.query(SeenJob.title)
+        .filter(SeenJob.user_id == current_user.id, SeenJob.title.isnot(None), SeenJob.title != "")
+        .all()
+    )
+    seen_categories: set[str] = set()
+    for (title,) in rows:
+        seen_categories.add(_detect_category(title))
+
+    # Return in a stable order matching _CATEGORY_KEYWORDS, then "Other"
+    ordered = [c for c, _ in _CATEGORY_KEYWORDS if c in seen_categories]
+    if "Other" in seen_categories:
+        ordered.append("Other")
+    return {"categories": ordered}
+
+
+@router.get("/job-trends")
+async def get_job_trends(
+    days: int = Query(7, ge=0, le=90),
+    hours: int = Query(0, ge=0, le=24),
+    categories: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from datetime import datetime as dt
+    now = dt.now(timezone.utc)
+
+    requested: list[str] | None = None
+    if categories:
+        requested = [c.strip() for c in categories.split(",") if c.strip()]
+
+    # --- hourly mode (1h or 24h) ---
+    if hours > 0:
+        since = now - timedelta(hours=hours)
+        slot_minutes = 10 if hours == 1 else 60
+        n_slots = (hours * 60) // slot_minutes
+
+        rows = (
+            db.query(SeenJob.first_seen_at, SeenJob.title)
+            .filter(
+                SeenJob.user_id == current_user.id,
+                SeenJob.title.isnot(None), SeenJob.title != "",
+                SeenJob.first_seen_at >= since,
+            )
+            .all()
+        )
+
+        # Build slot labels and index
+        slots = [(since + timedelta(minutes=i * slot_minutes)) for i in range(n_slots)]
+        def slot_label(dt_val):
+            return dt_val.strftime("%H:%M")
+        slot_labels = [slot_label(s) for s in slots]
+
+        counts: dict[str, dict[str, int]] = {}
+        for ts, title in rows:
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            cat = _detect_category(title or "")
+            idx = int((ts - since).total_seconds() // (slot_minutes * 60))
+            if 0 <= idx < n_slots:
+                label = slot_labels[idx]
+                counts.setdefault(cat, {})
+                counts[cat][label] = counts[cat].get(label, 0) + 1
+
+        if requested:
+            active_cats = [c for c in requested if c in counts]
+        else:
+            sorted_cats = sorted(counts.keys(), key=lambda c: sum(counts[c].values()), reverse=True)
+            active_cats = sorted_cats[:3]
+
+        series = [{"category": cat, "data": [counts.get(cat, {}).get(l, 0) for l in slot_labels]} for cat in active_cats]
+        return {"dates": slot_labels, "series": series}
+
+    # --- daily mode ---
+    end_date = date.today()
+    start_date = end_date - timedelta(days=max(days - 1, 0))
+
+    rows = (
+        db.query(cast(SeenJob.first_seen_at, Date).label("day"), SeenJob.title)
+        .filter(
+            SeenJob.user_id == current_user.id,
+            SeenJob.title.isnot(None), SeenJob.title != "",
+            cast(SeenJob.first_seen_at, Date) >= start_date,
+            cast(SeenJob.first_seen_at, Date) <= end_date,
+        )
+        .all()
+    )
+
+    date_list = [start_date + timedelta(days=i) for i in range(max(days, 1))]
+    date_str_list = [d.isoformat() for d in date_list]
+
+    counts: dict[str, dict[str, int]] = {}
+    for row_day, title in rows:
+        cat = _detect_category(title or "")
+        day_str = row_day.isoformat() if hasattr(row_day, "isoformat") else str(row_day)
+        if day_str not in date_str_list:
+            continue
+        counts.setdefault(cat, {})
+        counts[cat][day_str] = counts[cat].get(day_str, 0) + 1
+
+    if not counts:
+        return {"dates": [], "series": []}
+
+    # Trim leading all-zero dates so chart starts at first data point
+    first_data_idx = 0
+    for i, d in enumerate(date_str_list):
+        if any(counts.get(cat, {}).get(d, 0) > 0 for cat in counts):
+            first_data_idx = i
+            break
+    date_str_list = date_str_list[first_data_idx:]
+
+    if requested:
+        active_cats = [c for c in requested if c in counts]
+    else:
+        sorted_cats = sorted(counts.keys(), key=lambda c: sum(counts[c].values()), reverse=True)
+        active_cats = sorted_cats[:3]
+
+    series = [{"category": cat, "data": [counts.get(cat, {}).get(d, 0) for d in date_str_list]} for cat in active_cats]
+    return {"dates": date_str_list, "series": series}

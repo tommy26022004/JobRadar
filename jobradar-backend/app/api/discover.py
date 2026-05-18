@@ -2,8 +2,9 @@ import json
 import asyncio
 import re
 import uuid
+import logging
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db, SessionLocal
@@ -16,13 +17,16 @@ from app.agents.rss_fetcher import fetch_all_jobs, RemoteJob, ALL_SOURCES
 from groq import AsyncGroq
 from app.core.config import settings
 from typing import Annotated
+from app.core.limiter import limiter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/discover", tags=["discover"])
 
 SCAN_MODEL = "llama-3.1-8b-instant"
 AUTO_SCAN_COOLDOWN_HOURS = 4
 AUTO_SCAN_LIMIT = 15      # jobs per source for auto-scan
-HARD_SCAN_LIMIT = 100     # jobs per source for hard scan
+HARD_SCAN_LIMIT = 50      # jobs per source for hard scan (reduced from 100)
 FEED_SCORE_THRESHOLD = 50 # minimum score to save into feed
 
 
@@ -36,8 +40,9 @@ def _get_ai_client(user: User):
         return AsyncGroq(api_key=key), model, "groq"
 
     if provider == "gemini":
-        key = api_key or settings.GROQ_API_KEY
-        model = user.ai_model or SCAN_MODEL
+        # Gemini not yet supported for scan — fall back to Groq with server key
+        key = settings.GROQ_API_KEY
+        model = SCAN_MODEL
         return AsyncGroq(api_key=key), model, "groq"
 
     if provider == "openai":
@@ -66,16 +71,18 @@ def _extract_cv_domain_words(cv_content: str) -> set[str]:
     return {w for w in raw if w not in stop}
 
 
-def _keyword_prefilter(jobs: list[RemoteJob], cv_keywords: set[str], max_jobs: int = 80) -> list[RemoteJob]:
+def _keyword_prefilter(jobs: list[RemoteJob], cv_keywords: set[str], max_jobs: int = 0) -> list[RemoteJob]:
     if not cv_keywords:
-        return jobs[:max_jobs]
+        return jobs[:max_jobs] if max_jobs > 0 else jobs
 
     def keyword_score(job: RemoteJob) -> int:
         text = (job.title + " " + job.description[:800]).lower()
         return sum(1 for kw in cv_keywords if re.search(r'\b' + re.escape(kw) + r'\b', text))
 
     scored = sorted(jobs, key=keyword_score, reverse=True)
-    return scored[:max_jobs]
+    relevant = [j for j in scored if keyword_score(j) > 0]
+    result = relevant if len(relevant) >= 10 else scored
+    return result[:max_jobs] if max_jobs > 0 else result
 
 
 async def match_job(job: RemoteJob, cv_content: str, client, model: str, retries: int = 1) -> dict:
@@ -114,7 +121,7 @@ Return ONLY valid JSON, no explanation outside JSON:
             return {"score": int(data.get("score", 0)), "reason": data.get("reason", "")}
         except Exception:
             if attempt < retries:
-                await asyncio.sleep(2)
+                await asyncio.sleep(0.5)
             else:
                 return {"score": -1, "reason": "Could not analyze"}
 
@@ -125,7 +132,7 @@ def _save_seen_jobs(db: Session, user_id: int, results: list[dict]):
         if not r.get("url"):
             continue
         try:
-            db.add(SeenJob(user_id=user_id, job_url=r["url"], score=r.get("score", 0)))
+            db.add(SeenJob(user_id=user_id, job_url=r["url"], score=r.get("score", 0), title=r.get("title", "")))
             db.flush()
         except IntegrityError:
             db.rollback()
@@ -177,11 +184,11 @@ async def _run_auto_scan(scan_id: str, user_id: int, cv_content: str, ai_client,
             return
 
         cv_keywords = _extract_cv_domain_words(cv_content)
-        jobs = _keyword_prefilter(new_jobs, cv_keywords, max_jobs=80)
+        jobs = _keyword_prefilter(new_jobs, cv_keywords)
         update(total=len(jobs), message=f"Found {len(new_jobs)} new jobs, matching with your CV...")
 
         results = []
-        batch_size = 8
+        batch_size = 3
         for i in range(0, len(jobs), batch_size):
             batch = jobs[i:i + batch_size]
             scores = await asyncio.gather(*[match_job(job, cv_content, ai_client, ai_model) for job in batch])
@@ -197,9 +204,7 @@ async def _run_auto_scan(scan_id: str, user_id: int, cv_content: str, ai_client,
                 })
 
             sorted_so_far = sorted(results, key=lambda x: x["score"], reverse=True)
-            update(matched=len(results), results=sorted_so_far)
-            if i + batch_size < len(jobs):
-                await asyncio.sleep(1)
+            update(matched=i + len(batch), results=sorted_so_far)
 
         # Save ALL scanned jobs to seen_jobs (even low-score ones — so we don't re-scan them)
         all_scanned = [{
@@ -220,11 +225,18 @@ async def _run_auto_scan(scan_id: str, user_id: int, cv_content: str, ai_client,
         update(status="done", matched=len(final), results=final,
                message=f"Done — {len(new_matches)} new matches found")
 
+        # Send email notification for strong matches (score >= 75)
+        strong_matches = [r for r in final if r["score"] >= 75]
+        if strong_matches and user and user.email_notifications:
+            from app.core.email import send_job_matches_email
+            send_job_matches_email(user.email, strong_matches)
+
     except Exception as e:
+        logger.exception("Auto-scan %s failed for user %s", scan_id, user_id)
         scan = db.query(ScanJob).filter(ScanJob.id == scan_id).first()
         if scan:
             scan.status = "error"
-            scan.message = str(e)
+            scan.message = "Scan failed. Please try again."
             db.commit()
     finally:
         db.close()
@@ -232,6 +244,7 @@ async def _run_auto_scan(scan_id: str, user_id: int, cv_content: str, ai_client,
 
 async def _run_scan(
     scan_id: str,
+    user_id: int,
     cv_content: str,
     sources: list[str],
     custom_urls: list[str],
@@ -270,7 +283,7 @@ async def _run_scan(
         )
 
         cv_keywords = _extract_cv_domain_words(cv_content)
-        jobs = _keyword_prefilter(all_jobs, cv_keywords, max_jobs=80)
+        jobs = _keyword_prefilter(all_jobs, cv_keywords)
         skipped = len(all_jobs) - len(jobs)
 
         msg = f"Found {len(all_jobs)} jobs"
@@ -280,7 +293,7 @@ async def _run_scan(
         update(total=len(jobs), message=msg)
 
         results = []
-        batch_size = 8
+        batch_size = 3
         for i in range(0, len(jobs), batch_size):
             batch = jobs[i:i + batch_size]
             scores = await asyncio.gather(*[match_job(job, cv_content, ai_client, ai_model) for job in batch])
@@ -305,20 +318,22 @@ async def _run_scan(
 
             # Save progress after each batch so frontend can poll partial results
             sorted_so_far = sorted(results, key=lambda x: x["score"], reverse=True)
-            update(matched=len(results), results=sorted_so_far)
-
-            if i + batch_size < len(jobs):
-                await asyncio.sleep(1)
+            update(matched=i + len(batch), results=sorted_so_far)
 
         final = sorted(results, key=lambda x: x["score"], reverse=True)
         update(status="done", matched=len(final), results=final, message=f"Done — {len(final)} jobs matched")
 
+        # Save matched jobs into seen_jobs feed so Dashboard "New Matches" is populated
+        feed_jobs = [r for r in final if r["score"] >= FEED_SCORE_THRESHOLD]
+        if feed_jobs:
+            _save_seen_jobs(db, user_id, feed_jobs)
+
     except Exception as e:
-        db.query(ScanJob).filter(ScanJob.id == scan_id).first()
+        logger.exception("Hard-scan %s failed for user %s", scan_id, user_id)
         scan = db.query(ScanJob).filter(ScanJob.id == scan_id).first()
         if scan:
             scan.status = "error"
-            scan.message = str(e)
+            scan.message = "Scan failed. Please try again."
             db.commit()
     finally:
         db.close()
@@ -421,7 +436,9 @@ def get_feed(
 
 
 @router.post("/start")
+@limiter.limit("5/minute")
 async def start_scan(
+    request: Request,
     background_tasks: BackgroundTasks,
     cv_id: int = 0,
     sources: Annotated[list[str], Query()] = ["wwr", "remoteok", "remotive", "jobicy", "arbeitnow"],
@@ -446,6 +463,7 @@ async def start_scan(
     background_tasks.add_task(
         _run_scan,
         scan_id=scan_id,
+        user_id=current_user.id,
         cv_content=cv_content,
         sources=list(sources),
         custom_urls=list(custom_urls),

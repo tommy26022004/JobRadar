@@ -102,8 +102,8 @@ export default function NewJobPage() {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <header className="border-b bg-white px-6 py-3 flex items-center gap-4">
+    <div className="min-h-screen bg-background">
+      <header className="border-b bg-card px-6 py-3 flex items-center gap-4">
         <Link href="/dashboard" className="font-bold text-lg tracking-tight">JobRadar</Link>
       </header>
       <main className="max-w-2xl mx-auto p-6 space-y-6">
@@ -129,7 +129,7 @@ export default function NewJobPage() {
                 <div className="flex flex-wrap gap-2">
                   {cvs.map(cv => (
                     <button key={cv.id} onClick={() => setSelectedCv(cv.id)}
-                      className={`px-4 py-2 rounded-full text-sm border transition-colors ${selectedCv === cv.id ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400"}`}>
+                      className={`px-4 py-2 rounded-full text-sm border transition-colors ${selectedCv === cv.id ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-muted-foreground"}`}>
                       {cv.name}
                     </button>
                   ))}
@@ -186,7 +186,7 @@ export default function NewJobPage() {
                       {matched.score}/100
                     </span>
                   </div>
-                  <div className="w-full bg-zinc-100 rounded-full h-2">
+                  <div className="w-full bg-muted rounded-full h-2">
                     <div className={`h-2 rounded-full ${matched.score >= 70 ? "bg-green-500" : matched.score >= 50 ? "bg-yellow-500" : "bg-red-400"}`}
                       style={{ width: `${matched.score}%` }} />
                   </div>

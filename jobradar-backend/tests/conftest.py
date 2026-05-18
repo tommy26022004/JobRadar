@@ -9,8 +9,10 @@ from app.core.database import Base, get_db
 TEST_DB_URL = "sqlite:///./test_jobradar.db"
 
 os.environ.setdefault("DATABASE_URL", TEST_DB_URL)
-os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-testing-only-32chars!!")
 os.environ.setdefault("GROQ_API_KEY", "test-groq-key")
+os.environ.setdefault("RESEND_API_KEY", "")
+os.environ["TESTING"] = "true"  # disables rate limiting in tests
 
 engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

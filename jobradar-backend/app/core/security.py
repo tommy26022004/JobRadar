@@ -26,9 +26,14 @@ def create_refresh_token(subject: int) -> str:
     return jwt.encode({"sub": str(subject), "exp": expire, "type": "refresh"}, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 
-def decode_token(token: str) -> int | None:
+def decode_token(token: str, token_type: str = "access") -> int | None:
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        # Refresh tokens carry type="refresh"; access tokens carry no type field
+        if token_type == "access" and payload.get("type") == "refresh":
+            return None
+        if token_type == "refresh" and payload.get("type") != "refresh":
+            return None
         return int(payload["sub"])
     except JWTError:
         return None

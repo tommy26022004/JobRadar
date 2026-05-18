@@ -1,15 +1,15 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 
 
 class CVCreate(BaseModel):
-    name: str
-    content: str
+    name: str = Field(min_length=1, max_length=100)
+    content: str = Field(min_length=1, max_length=100_000)
 
 
 class CVUpdate(BaseModel):
-    name: str | None = None
-    content: str | None = None
+    name: str | None = Field(default=None, max_length=100)
+    content: str | None = Field(default=None, max_length=100_000)
 
 
 class CVResponse(BaseModel):

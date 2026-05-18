@@ -15,6 +15,8 @@ class Application(Base):
     match_score = Column(Float, nullable=True)
     ai_analysis = Column(Text, nullable=True)
     cv_suggestions = Column(Text, nullable=True)
+    interview_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

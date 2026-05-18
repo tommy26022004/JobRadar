@@ -72,7 +72,13 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
         if (!r.ok) return;
         const data = await r.json();
         setHardScan({ scan_id, status: data.status, total: data.total, matched: data.matched, message: data.message, results: data.results });
-        if (data.status === "done" || data.status === "error") stopHardPoll();
+        if (data.status === "done" || data.status === "error") {
+          stopHardPoll();
+          if (data.status === "done") {
+            fetch(`${BASE}/discover/feed`, { headers: authHeader() })
+              .then(r => r.json()).then(setFeed).catch(() => {});
+          }
+        }
       } catch { /* keep polling */ }
     }, 2000);
   }, [stopHardPoll]);
@@ -100,6 +106,18 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
     fetch(`${BASE}/discover/feed`, { headers: authHeader() })
       .then(r => r.json()).then(setFeed).catch(() => {});
   }, [user]);
+
+  // Reset all scan state on logout
+  useEffect(() => {
+    if (user) return;
+    stopHardPoll();
+    stopAutoPoll();
+    setHardScan(IDLE);
+    setAutoScan(IDLE);
+    setAutoScanStatus("idle");
+    setFeed(EMPTY_FEED);
+    initDoneRef.current = false;
+  }, [user, stopHardPoll, stopAutoPoll]);
 
   useEffect(() => {
     if (!user || initDoneRef.current) return;

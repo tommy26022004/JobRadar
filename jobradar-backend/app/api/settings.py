@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
 from app.core.database import get_db
 from app.api.deps import get_current_user
 from app.models.user import User
@@ -91,3 +91,26 @@ def clear_ai_settings(
 @router.get("/ai/providers")
 def list_providers():
     return SUPPORTED_PROVIDERS
+
+
+class NotificationSettingsUpdate(BaseModel):
+    email_notifications: StrictBool
+
+
+@router.get("/notifications")
+def get_notification_settings(current_user: User = Depends(get_current_user)):
+    return {
+        "email_notifications": current_user.email_notifications if current_user.email_notifications is not None else True,
+        "email": current_user.email,
+    }
+
+
+@router.put("/notifications")
+def update_notification_settings(
+    body: NotificationSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user.email_notifications = body.email_notifications
+    db.commit()
+    return {"message": "Notification settings updated", "email_notifications": body.email_notifications}

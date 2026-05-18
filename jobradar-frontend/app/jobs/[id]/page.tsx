@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, Job, Application, Status, STATUSES } from "@/lib/api";
@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
+import { ArrowLeft, Loader2, Trash2, Calendar, Save } from "lucide-react";
 
 const STATUS_LABELS: Record<Status, string> = {
   saved: "Saved", applied: "Applied", interview: "Interview", offer: "Offer 🎉", rejected: "Rejected",
@@ -19,11 +19,19 @@ export default function JobDetailPage() {
   const [job, setJob] = useState<Job | null>(null);
   const [app, setApp] = useState<Application | null>(null);
   const [loading, setLoading] = useState(true);
+  const [notes, setNotes] = useState("");
+  const [interviewAt, setInterviewAt] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     Promise.all([api.jobs.get(Number(id)), api.applications.list()]).then(([j, apps]) => {
       setJob(j);
-      setApp(apps.find(a => a.job_id === j.id) || null);
+      const found = apps.find(a => a.job_id === j.id) || null;
+      setApp(found);
+      if (found) {
+        setNotes(found.notes || "");
+        setInterviewAt(found.interview_at ? found.interview_at.slice(0, 16) : "");
+      }
     }).catch(() => toast.error("Failed to load job")).finally(() => setLoading(false));
   }, [id]);
 
@@ -34,6 +42,23 @@ export default function JobDetailPage() {
     toast.success("Status updated");
   };
 
+  const saveNotes = useCallback(async () => {
+    if (!app) return;
+    setSaving(true);
+    try {
+      const updated = await api.applications.update(app.id, {
+        notes: notes || null,
+        interview_at: interviewAt ? new Date(interviewAt).toISOString() : null,
+      });
+      setApp(updated);
+      toast.success("Saved");
+    } catch {
+      toast.error("Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }, [app, notes, interviewAt]);
+
   const deleteJob = async () => {
     if (!confirm("Delete this job?")) return;
     await api.jobs.delete(Number(id));
@@ -41,7 +66,7 @@ export default function JobDetailPage() {
   };
 
   if (loading) return (
-    <div className="min-h-screen bg-zinc-50 flex items-center justify-center">
+    <div className="min-h-screen bg-background flex items-center justify-center">
       <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
     </div>
   );
@@ -51,8 +76,8 @@ export default function JobDetailPage() {
   const skills = job.parsed_stack?.split(",").map(s => s.trim()).filter(Boolean) || [];
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <header className="border-b bg-white px-6 py-3 flex items-center gap-4">
+    <div className="min-h-screen bg-background">
+      <header className="border-b bg-card px-6 py-3 flex items-center gap-4">
         <Link href="/dashboard" className="font-bold text-lg tracking-tight">JobRadar</Link>
       </header>
       <main className="max-w-4xl mx-auto p-6 space-y-6">
@@ -73,7 +98,7 @@ export default function JobDetailPage() {
           <div className="flex flex-wrap gap-2">
             {STATUSES.map(s => (
               <button key={s} onClick={() => updateStatus(s)}
-                className={`px-4 py-1.5 rounded-full text-sm border transition-colors ${app.status === s ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400"}`}>
+                className={`px-4 py-1.5 rounded-full text-sm border transition-colors ${app.status === s ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border hover:border-muted-foreground"}`}>
                 {STATUS_LABELS[s]}
               </button>
             ))}
@@ -102,6 +127,43 @@ export default function JobDetailPage() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Interview date + notes */}
+            {app && (
+              <Card>
+                <CardHeader><CardTitle className="text-base flex items-center gap-2"><Calendar className="w-4 h-4" /> Interview & Notes</CardTitle></CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Interview Date</label>
+                    <input
+                      type="datetime-local"
+                      value={interviewAt}
+                      onChange={e => setInterviewAt(e.target.value)}
+                      className="w-full text-sm border border-border rounded-md px-3 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    {interviewAt && (
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(interviewAt).toLocaleString("vi-VN", { dateStyle: "full", timeStyle: "short" })}
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Notes</label>
+                    <textarea
+                      value={notes}
+                      onChange={e => setNotes(e.target.value)}
+                      placeholder="Ghi chú về công ty, recruiter, yêu cầu riêng..."
+                      rows={4}
+                      className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+                    />
+                  </div>
+                  <Button size="sm" onClick={saveNotes} disabled={saving} className="gap-1.5 w-full">
+                    {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                    {saving ? "Saving..." : "Save"}
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="space-y-4">
@@ -114,7 +176,7 @@ export default function JobDetailPage() {
                       {app.match_score}/100
                     </span>
                   </div>
-                  <div className="w-full bg-zinc-100 rounded-full h-2">
+                  <div className="w-full bg-muted rounded-full h-2">
                     <div className={`h-2 rounded-full ${app.match_score >= 70 ? "bg-green-500" : app.match_score >= 50 ? "bg-yellow-500" : "bg-red-400"}`}
                       style={{ width: `${app.match_score}%` }} />
                   </div>

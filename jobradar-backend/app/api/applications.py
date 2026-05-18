@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user
@@ -11,8 +11,20 @@ router = APIRouter(prefix="/applications", tags=["applications"])
 
 
 @router.get("/", response_model=list[ApplicationResponse])
-def list_applications(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return db.query(Application).filter(Application.user_id == current_user.id).order_by(Application.created_at.desc()).all()
+def list_applications(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return (
+        db.query(Application)
+        .filter(Application.user_id == current_user.id)
+        .order_by(Application.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.post("/", response_model=ApplicationResponse, status_code=201)
@@ -40,7 +52,7 @@ def update_application(app_id: int, body: ApplicationUpdate, db: Session = Depen
     app = db.query(Application).filter(Application.id == app_id, Application.user_id == current_user.id).first()
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(app, field, value)
     db.commit()
     db.refresh(app)

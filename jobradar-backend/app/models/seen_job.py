@@ -9,6 +9,7 @@ class SeenJob(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     job_url = Column(String, nullable=False)
+    title = Column(String, nullable=True)
     score = Column(Integer, default=0)
     first_seen_at = Column(DateTime(timezone=True), server_default=func.now())
 

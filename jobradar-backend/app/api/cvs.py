@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.deps import get_current_user
@@ -10,8 +10,20 @@ router = APIRouter(prefix="/cvs", tags=["cvs"])
 
 
 @router.get("/", response_model=list[CVResponse])
-def list_cvs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return db.query(CV).filter(CV.user_id == current_user.id).all()
+def list_cvs(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return (
+        db.query(CV)
+        .filter(CV.user_id == current_user.id)
+        .order_by(CV.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.post("/", response_model=CVResponse, status_code=201)

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
@@ -48,24 +48,24 @@ const EXP_LEVELS = [
   { key: "unknown", label: "Not specified" },
 ];
 const SOURCE_COLORS: Record<string, string> = {
-  WeWorkRemotely: "bg-blue-50 text-blue-700 border-blue-200",
-  RemoteOK: "bg-green-50 text-green-700 border-green-200",
-  Remotive: "bg-purple-50 text-purple-700 border-purple-200",
+  WeWorkRemotely: "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800",
+  RemoteOK: "bg-green-100 text-green-700 border-green-200 dark:bg-green-900/40 dark:text-green-300 dark:border-green-800",
+  Remotive: "bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-900/40 dark:text-purple-300 dark:border-purple-800",
 };
 const JOB_TYPE_COLORS: Record<string, string> = {
-  "full-time": "bg-emerald-50 text-emerald-700 border-emerald-200",
-  "part-time": "bg-amber-50 text-amber-700 border-amber-200",
-  "contract": "bg-orange-50 text-orange-700 border-orange-200",
-  "freelance": "bg-sky-50 text-sky-700 border-sky-200",
-  "unknown": "bg-zinc-50 text-zinc-400 border-zinc-200",
+  "full-time": "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-300 dark:border-emerald-800",
+  "part-time": "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-800",
+  "contract": "bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/40 dark:text-orange-300 dark:border-orange-800",
+  "freelance": "bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/40 dark:text-sky-300 dark:border-sky-800",
+  "unknown": "bg-muted text-muted-foreground border-border",
 };
 const EXP_COLORS: Record<string, string> = {
-  "intern": "bg-pink-50 text-pink-700 border-pink-200",
-  "entry": "bg-violet-50 text-violet-700 border-violet-200",
-  "mid": "bg-blue-50 text-blue-700 border-blue-200",
-  "senior": "bg-rose-50 text-rose-700 border-rose-200",
-  "manager": "bg-red-50 text-red-700 border-red-200",
-  "unknown": "bg-zinc-50 text-zinc-400 border-zinc-200",
+  "intern": "bg-pink-100 text-pink-700 border-pink-200 dark:bg-pink-900/40 dark:text-pink-300 dark:border-pink-800",
+  "entry": "bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-900/40 dark:text-violet-300 dark:border-violet-800",
+  "mid": "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800",
+  "senior": "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/40 dark:text-rose-300 dark:border-rose-800",
+  "manager": "bg-red-100 text-red-700 border-red-200 dark:bg-red-900/40 dark:text-red-300 dark:border-red-800",
+  "unknown": "bg-muted text-muted-foreground border-border",
 };
 const EXP_LABELS: Record<string, string> = {
   "intern": "Intern", "entry": "Entry/Junior", "mid": "Mid-level",
@@ -77,6 +77,7 @@ export default function DiscoverPage() {
   const router = useRouter();
   const { hardScan: scan, setHardScan: setScan, startHardScanPolling: startPolling } = useScan();
   const [cvs, setCvs] = useState<CV[]>([]);
+  const [cvsLoaded, setCvsLoaded] = useState(false);
   const [selectedCv, setSelectedCv] = useState<number>(0);
   const [enabledSources, setEnabledSources] = useState<Set<string>>(new Set(["wwr", "remoteok", "remotive", "jobicy", "arbeitnow"]));
   const [customUrls, setCustomUrls] = useState<string[]>([]);
@@ -87,6 +88,48 @@ export default function DiscoverPage() {
   const [filterExp, setFilterExp] = useState("all");
   const [minScore, setMinScore] = useState(40);
   const [showFilters, setShowFilters] = useState(false);
+  const [eta, setEta] = useState<number | null>(null);
+  const analyzeStartRef = useRef<number | null>(null);
+  const [step1Done, setStep1Done] = useState(false);
+  const [step2Done, setStep2Done] = useState(false);
+
+  // Animate steps with slight delay so user sees them tick one by one
+  useEffect(() => {
+    if (scan.status === "idle") {
+      setStep1Done(false);
+      setStep2Done(false);
+      return;
+    }
+    if (scan.total > 0 || scan.status === "done") {
+      const t1 = setTimeout(() => setStep1Done(true), 300);
+      const t2 = setTimeout(() => setStep2Done(true), 900);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
+    }
+  }, [scan.total, scan.status]);
+
+  useEffect(() => {
+    if (scan.status !== "running" || scan.total === 0) {
+      analyzeStartRef.current = null;
+      setEta(null);
+      return;
+    }
+    if (scan.matched > 0 && analyzeStartRef.current === null) {
+      analyzeStartRef.current = Date.now();
+    }
+    if (analyzeStartRef.current && scan.matched > 0) {
+      // Update ETA every second using a ticker for smooth countdown
+      const tick = () => {
+        if (!analyzeStartRef.current) return;
+        const elapsed = (Date.now() - analyzeStartRef.current) / 1000;
+        const rate = elapsed / scan.matched;
+        const remaining = Math.ceil(rate * (scan.total - scan.matched));
+        setEta(remaining > 0 ? remaining : null);
+      };
+      tick();
+      const interval = setInterval(tick, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [scan.matched, scan.total, scan.status]);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
@@ -96,6 +139,7 @@ export default function DiscoverPage() {
     api.cvs.list().then(data => {
       setCvs(data);
       if (data.length > 0) setSelectedCv(data[0].id);
+      setCvsLoaded(true);
     });
   }, []);
 
@@ -184,8 +228,8 @@ export default function DiscoverPage() {
   if (authLoading || !user) return null;
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <header className="border-b bg-white px-6 py-3 flex items-center justify-between">
+    <div className="min-h-screen bg-background">
+      <header className="border-b bg-card px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-6">
           <Link href="/dashboard" className="font-bold text-lg tracking-tight">JobRadar</Link>
           <nav className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -217,7 +261,7 @@ export default function DiscoverPage() {
               <div className="flex flex-wrap gap-2">
                 {SOURCES.map(s => (
                   <button key={s.key} onClick={() => toggleSource(s.key)}
-                    className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${enabledSources.has(s.key) ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400 text-muted-foreground"}`}>
+                    className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${enabledSources.has(s.key) ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-muted-foreground text-muted-foreground"}`}>
                     {enabledSources.has(s.key) ? "✓ " : ""}{s.label}
                   </button>
                 ))}
@@ -235,7 +279,7 @@ export default function DiscoverPage() {
               {customUrls.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {customUrls.map(u => (
-                    <div key={u} className="flex items-center gap-1 px-2 py-1 bg-zinc-100 rounded text-xs text-zinc-600 max-w-xs">
+                    <div key={u} className="flex items-center gap-1 px-2 py-1 bg-muted rounded text-xs text-muted-foreground max-w-xs">
                       <span className="truncate">{u}</span>
                       <button onClick={() => setCustomUrls(prev => prev.filter(x => x !== u))} className="shrink-0 hover:text-red-500"><X className="w-3 h-3" /></button>
                     </div>
@@ -250,7 +294,7 @@ export default function DiscoverPage() {
                 <div className="flex flex-wrap gap-2">
                   {cvs.map(cv => (
                     <button key={cv.id} onClick={() => setSelectedCv(cv.id)}
-                      className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${selectedCv === cv.id ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400"}`}>
+                      className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${selectedCv === cv.id ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-muted-foreground"}`}>
                       {cv.name}
                     </button>
                   ))}
@@ -272,31 +316,62 @@ export default function DiscoverPage() {
         </Card>
 
         {/* Progress */}
-        {(scan.status === "running" || (scan.status === "done" && scan.total > 0)) && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground flex items-center gap-2">
-                {scan.status === "running" && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                {scan.status === "running"
-                  ? scan.total > 0 ? `Analyzing ${scan.matched} / ${scan.total} jobs…` : scan.message
-                  : scan.message}
-              </span>
-              {scan.status === "done" && scan.total > 0 && (
-                <span className="text-muted-foreground font-medium tabular-nums text-xs">
-                  {scan.results.length} relevant · {scan.total - scan.results.length} skipped (low match)
-                </span>
+        {(scan.status === "running" || (scan.status === "done" && scan.total > 0)) && (() => {
+          const fetchedMatch = scan.message.match(/Found (\d+) jobs/);
+          const totalFetched = fetchedMatch ? fetchedMatch[1] : null;
+          const pct = scan.total > 0 ? Math.min((scan.matched / scan.total) * 100, 100) : 0;
+
+          const steps = [
+            { label: totalFetched ? `Fetched ${totalFetched} jobs` : "Fetching jobs…", done: step1Done },
+            { label: scan.total > 0 ? `Filtered to ${scan.total} relevant` : "Filtering by CV…", done: step2Done },
+            { label: scan.total > 0 ? `Analyzing ${scan.matched} / ${scan.total} jobs` : "Analyzing…", done: scan.status === "done" },
+          ];
+          const activeStep = steps.findIndex(s => !s.done);
+
+          return (
+            <div className="rounded-xl border bg-card p-4 space-y-3">
+              {/* Steps */}
+              <div className="space-y-2">
+                {steps.map((step, i) => (
+                  <div key={i} className="flex items-center gap-2.5">
+                    <div className={`w-2 h-2 rounded-full shrink-0 transition-all duration-500 ${
+                      step.done ? "bg-green-500 scale-90" :
+                      i === activeStep ? "bg-primary animate-pulse" :
+                      "bg-muted-foreground/30"
+                    }`} />
+                    <span className={`text-sm transition-all duration-300 ${
+                      step.done ? "text-muted-foreground line-through decoration-muted-foreground/40" :
+                      i === activeStep ? "text-foreground font-medium" :
+                      "text-muted-foreground"
+                    }`}>
+                      {step.label}
+                    </span>
+                    {i === activeStep && eta !== null && scan.status === "running" && (
+                      <span className="ml-auto text-xs text-muted-foreground tabular-nums shrink-0">~{eta}s</span>
+                    )}
+                    {step.done && i === steps.length - 1 && (
+                      <span className="ml-auto text-xs text-muted-foreground tabular-nums shrink-0">
+                        {filteredJobs.length} shown · {scan.total - filteredJobs.length} filtered/skipped
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Progress bar */}
+              {scan.total > 0 && (
+                <div className="w-full bg-muted rounded-full h-1">
+                  <div
+                    className={`h-1 rounded-full transition-all duration-700 ease-out ${scan.status === "done" ? "bg-green-500" : "bg-primary"}`}
+                    style={{ width: `${scan.status === "done" ? 100 : pct}%` }}
+                  />
+                </div>
               )}
             </div>
-            {scan.total > 0 && (
-              <div className="w-full bg-zinc-100 rounded-full h-2">
-                <div className={`h-2 rounded-full transition-all duration-500 ${scan.status === "done" ? "bg-green-500" : "bg-primary"}`}
-                  style={{ width: scan.status === "done" ? "100%" : `${Math.min((scan.matched / scan.total) * 100, 100)}%` }} />
-              </div>
-            )}
-          </div>
-        )}
+          );
+        })()}
 
-        {cvs.length === 0 && (
+        {cvsLoaded && cvs.length === 0 && (
           <div className="text-center py-12 text-muted-foreground">
             <p>You need a CV to discover matching jobs.</p>
             <Link href="/cvs" className="mt-2 inline-block text-sm text-primary hover:underline">Add your CV →</Link>
@@ -314,10 +389,10 @@ export default function DiscoverPage() {
                       const mid = scan.results.filter(j => j.score >= 50 && j.score < 70).length;
                       return `${filteredJobs.length} jobs found${strong > 0 ? ` · ${strong} strong matches (≥70%)` : mid > 0 ? ` · ${mid} good matches (≥50%)` : " · try a more detailed CV for better results"}`;
                     })()
-                  : `${scan.results.length} matched so far, ranking live...`}
+                  : `${filteredJobs.length} showing · ${scan.results.length} analyzed so far…`}
               </p>
               <button onClick={() => setShowFilters(v => !v)}
-                className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors ${showFilters || activeFilterCount > 0 ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400"}`}>
+                className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors ${showFilters || activeFilterCount > 0 ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-muted-foreground"}`}>
                 <SlidersHorizontal className="w-3.5 h-3.5" />
                 Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
               </button>
@@ -332,7 +407,7 @@ export default function DiscoverPage() {
                       <div className="flex flex-wrap gap-1.5">
                         {JOB_TYPES.map(t => (
                           <button key={t.key} onClick={() => setFilterType(t.key)}
-                            className={`px-3 py-1 rounded-full text-xs border transition-colors ${filterType === t.key ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400"}`}>
+                            className={`px-3 py-1 rounded-full text-xs border transition-colors ${filterType === t.key ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-muted-foreground"}`}>
                             {t.label}
                           </button>
                         ))}
@@ -343,7 +418,7 @@ export default function DiscoverPage() {
                       <div className="flex flex-wrap gap-1.5">
                         {REGIONS.map(r => (
                           <button key={r.key} onClick={() => setFilterRegion(r.key)}
-                            className={`px-3 py-1 rounded-full text-xs border transition-colors ${filterRegion === r.key ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400"}`}>
+                            className={`px-3 py-1 rounded-full text-xs border transition-colors ${filterRegion === r.key ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-muted-foreground"}`}>
                             {r.label}
                           </button>
                         ))}
@@ -358,7 +433,7 @@ export default function DiscoverPage() {
                     <div className="flex flex-wrap gap-1.5">
                       {EXP_LEVELS.map(e => (
                         <button key={e.key} onClick={() => setFilterExp(e.key)}
-                          className={`px-3 py-1 rounded-full text-xs border transition-colors ${filterExp === e.key ? "bg-primary text-primary-foreground border-primary" : "bg-white border-zinc-200 hover:border-zinc-400"}`}>
+                          className={`px-3 py-1 rounded-full text-xs border transition-colors ${filterExp === e.key ? "bg-primary text-primary-foreground border-primary" : "bg-background border-border hover:border-muted-foreground"}`}>
                           {e.label}
                         </button>
                       ))}
@@ -418,15 +493,15 @@ export default function DiscoverPage() {
                         <span className={`text-xs px-2 py-0.5 rounded-full border ${JOB_TYPE_COLORS[job.job_type] || JOB_TYPE_COLORS["unknown"]}`}>
                           {job.job_type === "unknown" ? "type ?" : job.job_type}
                         </span>
-                        <span className="text-xs px-2 py-0.5 rounded-full border bg-zinc-50 text-zinc-600 border-zinc-200">
+                        <span className="text-xs px-2 py-0.5 rounded-full border bg-muted text-muted-foreground border-border">
                           {job.region || job.region_group}
                         </span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full border ${SOURCE_COLORS[job.source] || "bg-zinc-50 text-zinc-600 border-zinc-200"}`}>
+                        <span className={`text-xs px-2 py-0.5 rounded-full border ${SOURCE_COLORS[job.source] || "bg-muted text-muted-foreground border-border"}`}>
                           {job.source}
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground">{job.reason}</p>
-                      <p className="text-xs text-zinc-400 line-clamp-2">{job.description}</p>
+                      <p className="text-xs text-muted-foreground/70 line-clamp-2">{job.description}</p>
                     </div>
                     <div className="flex flex-col items-end gap-2 shrink-0">
                       <a href={job.url} target="_blank" rel="noopener noreferrer">

@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.core.database import get_db, SessionLocal
+from app.core.limiter import limiter
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.models.job import Job
@@ -10,19 +11,24 @@ from app.models.cv import CV
 from app.models.application import Application
 from app.agents.pipeline import run_pipeline_streaming
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analyze", tags=["analyze"])
 
 
 class AnalyzeRequest(BaseModel):
-    raw_jd: str
+    raw_jd: str = Field(min_length=1, max_length=50_000)
     cv_id: int
-    title: str | None = None
-    company: str | None = None
+    title: str | None = Field(default=None, max_length=200)
+    company: str | None = Field(default=None, max_length=200)
 
 
 @router.post("/")
+@limiter.limit("20/minute")
 async def analyze(
+    request: Request,
     body: AnalyzeRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -67,39 +73,49 @@ async def analyze(
             "cv_suggestions": "",
         }
 
-        async for chunk in run_pipeline_streaming(body.raw_jd, cv_content):
-            yield chunk
-            if chunk.startswith("data:"):
-                try:
-                    data = json.loads(chunk[5:].strip())
-                    if data.get("event") == "parsed":
-                        final_state["parsed_title"] = data.get("title", "")
-                        final_state["parsed_company"] = data.get("company", "")
-                        final_state["parsed_stack"] = data.get("stack", "")
-                        final_state["parsed_salary"] = data.get("salary", "")
-                    elif data.get("event") == "matched":
-                        final_state["match_score"] = data.get("score", 0)
-                        final_state["ai_analysis"] = data.get("analysis", "")
-                    elif data.get("event") == "suggested":
-                        final_state["cv_suggestions"] = data.get("suggestions", "")
-                    elif data.get("event") == "done":
-                        save_db = SessionLocal()
-                        save_db.query(Job).filter(Job.id == job_id).update({
-                            "parsed_title": final_state["parsed_title"],
-                            "parsed_company": final_state["parsed_company"],
-                            "parsed_stack": final_state["parsed_stack"],
-                            "parsed_requirements": final_state["parsed_requirements"],
-                            "parsed_salary": final_state["parsed_salary"],
-                        })
-                        save_db.query(Application).filter(Application.id == app_id).update({
-                            "match_score": final_state["match_score"],
-                            "ai_analysis": final_state["ai_analysis"],
-                            "cv_suggestions": final_state["cv_suggestions"],
-                        })
-                        save_db.commit()
-                        save_db.close()
-                        yield f"data: {{\"event\": \"saved\", \"job_id\": {job_id}, \"application_id\": {app_id}}}\n\n"
-                except Exception:
-                    pass
+        try:
+            async for chunk in run_pipeline_streaming(body.raw_jd, cv_content):
+                yield chunk
+                if chunk.startswith("data:"):
+                    try:
+                        data = json.loads(chunk[5:].strip())
+                        if data.get("event") == "parsed":
+                            final_state["parsed_title"] = data.get("title", "")
+                            final_state["parsed_company"] = data.get("company", "")
+                            final_state["parsed_stack"] = data.get("stack", "")
+                            final_state["parsed_salary"] = data.get("salary", "")
+                        elif data.get("event") == "matched":
+                            final_state["match_score"] = data.get("score", 0)
+                            final_state["ai_analysis"] = data.get("analysis", "")
+                        elif data.get("event") == "suggested":
+                            final_state["cv_suggestions"] = data.get("suggestions", "")
+                        elif data.get("event") == "done":
+                            save_db = SessionLocal()
+                            try:
+                                save_db.query(Job).filter(Job.id == job_id).update({
+                                    "parsed_title": final_state["parsed_title"],
+                                    "parsed_company": final_state["parsed_company"],
+                                    "parsed_stack": final_state["parsed_stack"],
+                                    "parsed_requirements": final_state["parsed_requirements"],
+                                    "parsed_salary": final_state["parsed_salary"],
+                                })
+                                save_db.query(Application).filter(Application.id == app_id).update({
+                                    "match_score": final_state["match_score"],
+                                    "ai_analysis": final_state["ai_analysis"],
+                                    "cv_suggestions": final_state["cv_suggestions"],
+                                })
+                                save_db.commit()
+                                yield f"data: {{\"event\": \"saved\", \"job_id\": {job_id}, \"application_id\": {app_id}}}\n\n"
+                            except Exception:
+                                logger.exception("Failed to save analysis results for job %s", job_id)
+                                save_db.rollback()
+                                yield 'data: {"event": "error", "message": "Failed to save results"}\n\n'
+                            finally:
+                                save_db.close()
+                    except json.JSONDecodeError:
+                        pass  # non-JSON SSE chunks (keep-alives, etc.) are fine to skip
+        except Exception:
+            logger.exception("Analysis pipeline failed for job %s", job_id)
+            yield 'data: {"event": "error", "message": "Analysis failed. Please try again."}\n\n'
 
     return StreamingResponse(stream(), media_type="text/event-stream")

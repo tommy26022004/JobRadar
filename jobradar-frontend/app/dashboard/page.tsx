@@ -12,21 +12,62 @@ import { Loader2, Plus, Briefcase, TrendingUp, Award, Zap, ExternalLink, Refresh
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
+const MOCK_JOBS: Job[] = [
+  { id: 1001, title: "Senior Full-Stack Engineer", company: "Stripe", raw_jd: "", parsed_title: "Senior Full-Stack Engineer", parsed_company: "Stripe", parsed_stack: "React,TypeScript,Go,PostgreSQL", parsed_requirements: null, parsed_salary: "$140k–$180k/yr", created_at: "" },
+  { id: 1002, title: "Backend Engineer – Platform", company: "Notion", raw_jd: "", parsed_title: "Backend Engineer – Platform", parsed_company: "Notion", parsed_stack: "Python,FastAPI,Redis,AWS", parsed_requirements: null, parsed_salary: "$120k–$160k/yr", created_at: "" },
+  { id: 1003, title: "Frontend Engineer", company: "Linear", raw_jd: "", parsed_title: "Frontend Engineer", parsed_company: "Linear", parsed_stack: "React,TypeScript,GraphQL", parsed_requirements: null, parsed_salary: "$110k–$145k/yr", created_at: "" },
+  { id: 1004, title: "Software Engineer II", company: "Vercel", raw_jd: "", parsed_title: "Software Engineer II", parsed_company: "Vercel", parsed_stack: "Next.js,Rust,Edge Runtime", parsed_requirements: null, parsed_salary: "$130k–$170k/yr", created_at: "" },
+  { id: 1005, title: "Full-Stack Developer", company: "Supabase", raw_jd: "", parsed_title: "Full-Stack Developer", parsed_company: "Supabase", parsed_stack: "TypeScript,PostgreSQL,Deno", parsed_requirements: null, parsed_salary: "$100k–$140k/yr", created_at: "" },
+  { id: 1006, title: "Staff Engineer – APIs", company: "Twilio", raw_jd: "", parsed_title: "Staff Engineer – APIs", parsed_company: "Twilio", parsed_stack: "Node.js,Python,Kafka,GCP", parsed_requirements: null, parsed_salary: "$160k–$210k/yr", created_at: "" },
+  { id: 1007, title: "React Native Engineer", company: "Spotify", raw_jd: "", parsed_title: "React Native Engineer", parsed_company: "Spotify", parsed_stack: "React Native,TypeScript,GraphQL", parsed_requirements: null, parsed_salary: "$115k–$155k/yr", created_at: "" },
+];
+
+const MOCK_APPS: AppWithJob[] = [
+  { id: 2001, job_id: 1001, cv_id: 1, status: "interview", match_score: 87, ai_analysis: null, cv_suggestions: null, interview_at: null, notes: null, created_at: "", updated_at: null, job: MOCK_JOBS[0] },
+  { id: 2002, job_id: 1002, cv_id: 1, status: "applied",   match_score: 79, ai_analysis: null, cv_suggestions: null, interview_at: null, notes: null, created_at: "", updated_at: null, job: MOCK_JOBS[1] },
+  { id: 2003, job_id: 1003, cv_id: 1, status: "applied",   match_score: 74, ai_analysis: null, cv_suggestions: null, interview_at: null, notes: null, created_at: "", updated_at: null, job: MOCK_JOBS[2] },
+  { id: 2004, job_id: 1004, cv_id: 1, status: "offer",     match_score: 91, ai_analysis: null, cv_suggestions: null, interview_at: null, notes: null, created_at: "", updated_at: null, job: MOCK_JOBS[3] },
+  { id: 2005, job_id: 1005, cv_id: 1, status: "saved",     match_score: 68, ai_analysis: null, cv_suggestions: null, interview_at: null, notes: null, created_at: "", updated_at: null, job: MOCK_JOBS[4] },
+  { id: 2006, job_id: 1006, cv_id: 1, status: "rejected",  match_score: 55, ai_analysis: null, cv_suggestions: null, interview_at: null, notes: null, created_at: "", updated_at: null, job: MOCK_JOBS[5] },
+  { id: 2007, job_id: 1007, cv_id: 1, status: "saved",     match_score: 72, ai_analysis: null, cv_suggestions: null, interview_at: null, notes: null, created_at: "", updated_at: null, job: MOCK_JOBS[6] },
+];
+
+const MOCK_STATS: Stats = {
+  total_jobs: 7,
+  by_status: { saved: 2, applied: 2, interview: 1, offer: 1, rejected: 1 },
+  avg_score: 75,
+  quota: { remaining_requests: 14399, limit_requests: 14400, reset_requests: "6s" },
+  provider: "groq",
+};
+
 const STATUS_LABELS: Record<Status, string> = {
   saved: "Saved", applied: "Applied", interview: "Interview",
   offer: "Offer 🎉", rejected: "Rejected",
 };
 
 const STATUS_COLORS: Record<Status, string> = {
-  saved: "bg-zinc-100 text-zinc-700", applied: "bg-blue-100 text-blue-700",
-  interview: "bg-yellow-100 text-yellow-700", offer: "bg-green-100 text-green-700",
-  rejected: "bg-red-100 text-red-700",
+  saved: "bg-zinc-100 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200",
+  applied: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300",
+  interview: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300",
+  offer: "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300",
+  rejected: "bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300",
+};
+
+const COL_ACCENT: Record<Status, { dot: string; text: string; header: string; glow: string }> = {
+  saved:     { dot: "bg-zinc-400",   text: "text-zinc-500 dark:text-zinc-300",   header: "bg-zinc-100 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-700",   glow: "shadow-zinc-500/10" },
+  applied:   { dot: "bg-blue-500",   text: "text-blue-600 dark:text-blue-400",   header: "bg-blue-50 dark:bg-blue-950/50 border-b border-blue-100 dark:border-blue-900",   glow: "shadow-blue-500/10" },
+  interview: { dot: "bg-yellow-500", text: "text-yellow-600 dark:text-yellow-400", header: "bg-yellow-50 dark:bg-yellow-950/50 border-b border-yellow-100 dark:border-yellow-900", glow: "shadow-yellow-500/10" },
+  offer:     { dot: "bg-green-500",  text: "text-green-600 dark:text-green-400",  header: "bg-green-50 dark:bg-green-950/50 border-b border-green-100 dark:border-green-900",  glow: "shadow-green-500/10" },
+  rejected:  { dot: "bg-red-400",    text: "text-red-500 dark:text-red-400",    header: "bg-red-50 dark:bg-red-950/50 border-b border-red-100 dark:border-red-900",    glow: "shadow-red-500/10" },
 };
 
 const EXP_COLORS: Record<string, string> = {
-  intern: "bg-pink-50 text-pink-700", entry: "bg-violet-50 text-violet-700",
-  mid: "bg-blue-50 text-blue-700", senior: "bg-rose-50 text-rose-700",
-  manager: "bg-red-50 text-red-700", unknown: "bg-zinc-50 text-zinc-500",
+  intern: "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300",
+  entry: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
+  mid: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  senior: "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300",
+  manager: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+  unknown: "bg-muted text-muted-foreground",
 };
 
 type AppWithJob = Application & { job?: Job };
@@ -46,13 +87,13 @@ function StatCard({ icon, label, value, sub, color }: {
   icon: React.ReactNode; label: string; value: string | number; sub?: string; color?: string;
 }) {
   return (
-    <Card>
-      <CardContent className="p-4 flex items-start gap-3">
-        <div className={`p-2 rounded-lg ${color || "bg-zinc-100"}`}>{icon}</div>
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground font-medium">{label}</p>
-          <p className="text-xl font-bold tabular-nums">{value}</p>
-          {sub && <p className="text-xs text-muted-foreground truncate">{sub}</p>}
+    <Card className="border-border/60">
+      <CardContent className="p-4 flex items-center gap-3">
+        <div className={`p-2.5 rounded-xl shrink-0 ${color || "bg-muted"}`}>{icon}</div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs text-muted-foreground font-medium tracking-wide uppercase">{label}</p>
+          <p className="text-2xl font-bold tabular-nums leading-tight">{value}</p>
+          {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
         </div>
       </CardContent>
     </Card>
@@ -68,7 +109,7 @@ function QuotaBar({ used, total, label }: { used: number; total: number; label: 
         <span>{label}</span>
         <span>{(total - used).toLocaleString()} / {total.toLocaleString()} remaining</span>
       </div>
-      <div className="w-full bg-zinc-100 rounded-full h-1.5">
+      <div className="w-full bg-muted rounded-full h-1.5">
         <div className={`h-1.5 rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
@@ -77,10 +118,12 @@ function QuotaBar({ used, total, label }: { used: number; total: number; label: 
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { feed, refreshFeed, autoScan } = useScan();
+  const { feed, refreshFeed, autoScan, autoScanStatus } = useScan();
   const [apps, setApps] = useState<AppWithJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [feedPage, setFeedPage] = useState(0);
+  const [isMock, setIsMock] = useState(false);
 
   const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem("access_token")}` });
 
@@ -90,9 +133,15 @@ export default function DashboardPage() {
       api.jobs.list(),
       fetch(`${BASE}/dashboard/stats`, { headers: authHeader() }).then(r => r.json()),
     ]).then(([applications, jobs, s]) => {
-      const jobMap = Object.fromEntries(jobs.map((j: Job) => [j.id, j]));
-      setApps(applications.map((a: Application) => ({ ...a, job: jobMap[a.job_id] })));
-      setStats(s);
+      if (applications.length === 0) {
+        setApps(MOCK_APPS);
+        setStats(MOCK_STATS);
+        setIsMock(true);
+      } else {
+        const jobMap = Object.fromEntries(jobs.map((j: Job) => [j.id, j]));
+        setApps(applications.map((a: Application) => ({ ...a, job: jobMap[a.job_id] })));
+        setStats(s);
+      }
     }).catch(() => toast.error("Failed to load dashboard")).finally(() => setLoading(false));
   }, []);
 
@@ -101,6 +150,7 @@ export default function DashboardPage() {
     const newStatus = result.destination.droppableId as Status;
     const appId = parseInt(result.draggableId);
     setApps(prev => prev.map(a => a.id === appId ? { ...a, status: newStatus } : a));
+    if (isMock) return; // mock data — don't call API
     try {
       await api.applications.update(appId, { status: newStatus });
       fetch(`${BASE}/dashboard/stats`, { headers: authHeader() }).then(r => r.json()).then(setStats);
@@ -122,26 +172,28 @@ export default function DashboardPage() {
   const feedJobs = feed.jobs;
   const isAutoScanning = autoScan.status === "running";
   const newCount = feed.new_count;
-  const { autoScanStatus } = useScan();
+  const PAGE_SIZE = 5;
+  const totalPages = Math.ceil(feedJobs.length / PAGE_SIZE);
+  const pagedJobs = feedJobs.slice(feedPage * PAGE_SIZE, (feedPage + 1) * PAGE_SIZE);
 
   return (
-    <div className="space-y-6">
+    <div className="h-full flex flex-col gap-4 overflow-hidden">
       {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
         <StatCard icon={<Briefcase className="w-4 h-4 text-blue-600" />} label="Jobs Tracked"
           value={stats?.total_jobs ?? apps.length}
           sub={`${stats?.by_status.applied ?? 0} applied · ${stats?.by_status.interview ?? 0} interviews`}
-          color="bg-blue-50" />
+          color="bg-blue-100 dark:bg-blue-900/40" />
         <StatCard icon={<Award className="w-4 h-4 text-green-600" />} label="Avg Match Score"
           value={stats?.avg_score ? `${stats.avg_score}%` : "—"}
-          sub="across all tracked jobs" color="bg-green-50" />
+          sub="across all tracked jobs" color="bg-green-100 dark:bg-green-900/40" />
         <StatCard icon={<TrendingUp className="w-4 h-4 text-violet-600" />} label="Offer / Interview"
           value={`${stats?.by_status.offer ?? 0} / ${stats?.by_status.interview ?? 0}`}
-          sub={`${stats?.by_status.rejected ?? 0} rejected`} color="bg-violet-50" />
+          sub={`${stats?.by_status.rejected ?? 0} rejected`} color="bg-violet-100 dark:bg-violet-900/40" />
         <Card>
           <CardContent className="p-4 space-y-2">
             <div className="flex items-center gap-2">
-              <div className="p-2 rounded-lg bg-amber-50">
+              <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/40">
                 <Zap className="w-4 h-4 text-amber-600" />
               </div>
               <div>
@@ -165,11 +217,18 @@ export default function DashboardPage() {
       </div>
 
       {/* Kanban + New Matches */}
-      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 flex-1 min-h-0">
         {/* Kanban */}
-        <div className="xl:col-span-3 space-y-3">
+        <div className="xl:col-span-3 flex flex-col gap-3 min-h-0">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-sm">Application Board</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="font-semibold text-sm">Application Board</h2>
+              {isMock && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+                  sample data
+                </span>
+              )}
+            </div>
             <Link href="/jobs/new" className="flex items-center gap-1 text-xs text-primary hover:underline">
               <Plus className="w-3.5 h-3.5" /> Add job
             </Link>
@@ -184,85 +243,103 @@ export default function DashboardPage() {
             </div>
           ) : (
             <DragDropContext onDragEnd={onDragEnd}>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-                {columns.map(({ status, apps: colApps }) => (
-                  <div key={status} className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        {STATUS_LABELS[status]}
-                      </span>
-                      <span className="text-xs text-muted-foreground">{colApps.length}</span>
-                    </div>
-                    <Droppable droppableId={status}>
-                      {(provided, snapshot) => (
-                        <div ref={provided.innerRef} {...provided.droppableProps}
-                          className={`min-h-20 rounded-lg p-1.5 transition-colors ${snapshot.isDraggingOver ? "bg-zinc-200" : "bg-zinc-100"}`}>
-                          {colApps.map((app, index) => (
-                            <Draggable key={app.id} draggableId={String(app.id)} index={index}>
-                              {(provided, snapshot) => (
-                                <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps}
-                                  className={`mb-1.5 ${snapshot.isDragging ? "opacity-80" : ""}`}
-                                  onClick={() => router.push(`/jobs/${app.job_id}`)}>
-                                  <Card className="cursor-pointer hover:shadow-md transition-shadow">
-                                    <CardContent className="p-2.5 space-y-1">
-                                      <p className="text-xs font-medium leading-tight line-clamp-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 overflow-y-auto flex-1 min-h-0">
+                {columns.map(({ status, apps: colApps }) => {
+                  const accent = COL_ACCENT[status];
+                  return (
+                    <div key={status} className="flex flex-col min-h-0">
+                      {/* Column header */}
+                      <div className={`flex items-center justify-between px-3 py-2 rounded-t-xl ${accent.header}`}>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${accent.dot}`} />
+                          <span className={`text-[11px] font-bold uppercase tracking-widest ${accent.text}`}>
+                            {STATUS_LABELS[status].replace(" 🎉", "")}
+                          </span>
+                        </div>
+                        <span className={`text-[11px] font-bold ${accent.text} opacity-80`}>{colApps.length}</span>
+                      </div>
+                      <Droppable droppableId={status}>
+                        {(provided, snapshot) => (
+                          <div ref={provided.innerRef} {...provided.droppableProps}
+                            className={`flex-1 rounded-b-xl p-1.5 space-y-1.5 transition-colors border border-t-0 ${snapshot.isDraggingOver ? "bg-muted/60 border-border" : "bg-muted/20 border-border/40"}`}
+                            style={{ minHeight: "200px" }}>
+                            {colApps.map((app, index) => (
+                              <Draggable key={app.id} draggableId={String(app.id)} index={index}>
+                                {(provided, snapshot) => (
+                                  <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps}
+                                    className={`transition-transform ${snapshot.isDragging ? "scale-[1.02] rotate-1 shadow-xl" : ""}`}
+                                    onClick={() => !isMock && router.push(`/jobs/${app.job_id}`)}>
+                                    <div className={`rounded-lg border bg-card p-2.5 space-y-1.5 transition-all shadow-sm ${isMock ? "cursor-default" : "cursor-pointer hover:shadow-md hover:border-primary/40"} border-border/60`}>
+                                      <p className="text-[11px] font-semibold leading-snug line-clamp-2 text-foreground">
                                         {app.job?.parsed_title || app.job?.title || "Untitled"}
                                       </p>
-                                      <p className="text-xs text-muted-foreground truncate">
+                                      <p className="text-[10px] text-muted-foreground font-medium truncate">
                                         {app.job?.parsed_company || app.job?.company || "—"}
                                       </p>
                                       {app.match_score !== null && (
-                                        <Badge variant="outline" className={`text-xs ${STATUS_COLORS[status]}`}>
-                                          {app.match_score}%
-                                        </Badge>
+                                        <div className="pt-0.5">
+                                          <div className="flex items-center justify-between mb-0.5">
+                                            <span className="text-[9px] text-muted-foreground uppercase tracking-wide">match</span>
+                                            <span className={`text-[11px] font-bold tabular-nums ${app.match_score >= 75 ? "text-green-500" : app.match_score >= 55 ? "text-yellow-500" : "text-red-400"}`}>
+                                              {app.match_score}%
+                                            </span>
+                                          </div>
+                                          <div className="h-1 rounded-full bg-muted overflow-hidden">
+                                            <div className={`h-full rounded-full transition-all ${app.match_score >= 75 ? "bg-green-500" : app.match_score >= 55 ? "bg-yellow-500" : "bg-red-400"}`}
+                                              style={{ width: `${app.match_score}%` }} />
+                                          </div>
+                                        </div>
                                       )}
-                                    </CardContent>
-                                  </Card>
-                                </div>
-                              )}
-                            </Draggable>
-                          ))}
-                          {provided.placeholder}
-                        </div>
-                      )}
-                    </Droppable>
-                  </div>
-                ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </Draggable>
+                            ))}
+                            {provided.placeholder}
+                          </div>
+                        )}
+                      </Droppable>
+                    </div>
+                  );
+                })}
               </div>
             </DragDropContext>
           )}
         </div>
 
         {/* New Matches panel */}
-        <div className="xl:col-span-2 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h2 className="font-semibold text-sm">New Matches For You</h2>
-              {newCount > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground text-xs font-medium">
-                  {newCount} new
-                </span>
-              )}
+        <div className="xl:col-span-2 min-h-0 flex flex-col">
+          <Card className="flex flex-col flex-1 min-h-0">
+            <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b shrink-0">
+              <div className="flex items-center gap-2">
+                <h2 className="font-semibold text-sm">New Matches For You</h2>
+                {newCount > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground text-xs font-medium">
+                    {newCount} new
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {feed.next_scan_in_minutes !== null && feed.next_scan_in_minutes > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    next scan in {feed.next_scan_in_minutes}m
+                  </span>
+                )}
+                <button onClick={refreshFeed} disabled={isAutoScanning}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
+                  <RefreshCw className={`w-3.5 h-3.5 ${isAutoScanning ? "animate-spin" : ""}`} />
+                  {isAutoScanning ? "Scanning..." : "Refresh"}
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              {feed.next_scan_in_minutes !== null && feed.next_scan_in_minutes > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  next scan in {feed.next_scan_in_minutes}m
-                </span>
-              )}
-              <button onClick={refreshFeed} disabled={isAutoScanning}
-                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
-                <RefreshCw className={`w-3.5 h-3.5 ${isAutoScanning ? "animate-spin" : ""}`} />
-                {isAutoScanning ? "Scanning..." : "Refresh"}
-              </button>
-            </div>
-          </div>
 
-          {feed.total_today > 0 && (
-            <p className="text-xs text-muted-foreground">
-              {feed.total_today} matches found today
-            </p>
-          )}
+            {feed.total_today > 0 && (
+              <p className="text-xs text-muted-foreground px-4 pt-2 shrink-0">
+                {feed.total_today} matches found today
+              </p>
+            )}
+
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
 
           {/* Auto-scanning skeleton */}
           {isAutoScanning && feedJobs.length === 0 && (
@@ -270,8 +347,8 @@ export default function DashboardPage() {
               {[1, 2, 3].map(i => (
                 <Card key={i} className="animate-pulse">
                   <CardContent className="p-3">
-                    <div className="h-3 bg-zinc-200 rounded w-3/4 mb-2" />
-                    <div className="h-3 bg-zinc-100 rounded w-1/2" />
+                    <div className="h-3 bg-muted rounded w-3/4 mb-2" />
+                    <div className="h-3 bg-muted/60 rounded w-1/2" />
                   </CardContent>
                 </Card>
               ))}
@@ -313,7 +390,7 @@ export default function DashboardPage() {
           {/* Job list */}
           {feedJobs.length > 0 && (
             <div className="space-y-2">
-              {feedJobs.map((m, i) => (
+              {pagedJobs.map((m, i) => (
                 <Card key={i} className={`hover:shadow-md transition-shadow ${m.is_new ? "border-primary/30" : ""}`}>
                   <CardContent className="p-3 space-y-1.5">
                     <div className="flex items-start justify-between gap-2">
@@ -337,18 +414,41 @@ export default function DashboardPage() {
                         <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{m.reason}</p>
                       </div>
                       <a href={m.url} target="_blank" rel="noopener noreferrer"
-                        className="shrink-0 p-1.5 rounded hover:bg-zinc-100 transition-colors">
+                        className="shrink-0 p-1.5 rounded hover:bg-muted transition-colors">
                         <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
                       </a>
                     </div>
                   </CardContent>
                 </Card>
               ))}
-              <Link href="/discover" className="block text-center text-xs text-primary hover:underline py-2">
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    onClick={() => setFeedPage(p => Math.max(0, p - 1))}
+                    disabled={feedPage === 0}
+                    className="text-xs px-2.5 py-1 rounded border disabled:opacity-30 hover:bg-muted transition-colors"
+                  >← Prev</button>
+                  <span className="text-xs text-muted-foreground">
+                    {feedPage + 1} / {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setFeedPage(p => Math.min(totalPages - 1, p + 1))}
+                    disabled={feedPage === totalPages - 1}
+                    className="text-xs px-2.5 py-1 rounded border disabled:opacity-30 hover:bg-muted transition-colors"
+                  >Next →</button>
+                </div>
+              )}
+
+              <Link href="/discover" className="block text-center text-xs text-primary hover:underline py-1">
                 Run deep scan for more results →
               </Link>
             </div>
           )}
+
+            </div>
+          </Card>
         </div>
       </div>
     </div>

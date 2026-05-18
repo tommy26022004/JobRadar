@@ -17,6 +17,7 @@ class User(Base):
     ai_api_key = Column(String, nullable=True)     # user's own key, overrides server default
     ai_model = Column(String, nullable=True)       # optional model override
     last_auto_scan_at = Column(DateTime(timezone=True), nullable=True)
+    email_notifications = Column(Boolean, default=True)
 
     cvs = relationship("CV", back_populates="user", cascade="all, delete-orphan")
     jobs = relationship("Job", back_populates="user", cascade="all, delete-orphan")
