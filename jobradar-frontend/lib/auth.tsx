@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 
-type User = { id: number; email: string; full_name: string };
+type User = { id: number; email: string; full_name: string; is_verified?: boolean };
 type AuthCtx = {
   user: User | null;
   loading: boolean;
@@ -40,7 +40,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("refresh_token", refresh_token);
     const me = await api.auth.me();
     setUser(me);
-    router.push("/dashboard");
+    // Only go to dashboard if auto-verified (no Resend key in dev)
+    if (me.is_verified !== false) {
+      router.push("/dashboard");
+    }
+    // Otherwise register page will show "check your email" UI
   };
 
   const logout = () => {

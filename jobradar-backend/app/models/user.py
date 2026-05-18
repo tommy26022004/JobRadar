@@ -9,13 +9,17 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=True)  # nullable for OAuth-only users
     full_name = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
+    is_verified = Column(Boolean, default=False)
+    verification_token = Column(String, nullable=True, index=True)
+    oauth_provider = Column(String, nullable=True)   # "google" | None
+    oauth_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    ai_provider = Column(String, default="groq")  # groq / gemini / openai
-    ai_api_key = Column(String, nullable=True)     # user's own key, overrides server default
-    ai_model = Column(String, nullable=True)       # optional model override
+    ai_provider = Column(String, default="groq")
+    ai_api_key = Column(String, nullable=True)
+    ai_model = Column(String, nullable=True)
     last_auto_scan_at = Column(DateTime(timezone=True), nullable=True)
     email_notifications = Column(Boolean, default=True)
 

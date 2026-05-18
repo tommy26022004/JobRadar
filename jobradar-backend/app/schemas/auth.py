@@ -35,6 +35,7 @@ class UserResponse(BaseModel):
     id: int
     email: str
     full_name: str | None
+    is_verified: bool = True
 
     class Config:
         from_attributes = True

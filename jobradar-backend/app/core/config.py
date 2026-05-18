@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = "JobRadar <notifications@jobradar.app>"
+    FRONTEND_URL: str = "http://localhost:3000"
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
 
     @model_validator(mode="after")
     def validate_secret_key(self) -> "Settings":
