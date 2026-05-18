@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { useScan } from "@/lib/scan-context";
-import { Loader2, Plus, Briefcase, TrendingUp, Award, Zap, ExternalLink, RefreshCw, Sparkles, CalendarClock } from "lucide-react";
+import { Loader2, Plus, Briefcase, TrendingUp, Award, Zap, ExternalLink, RefreshCw, Sparkles, CalendarClock, BookmarkPlus, Check } from "lucide-react";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
@@ -116,6 +116,43 @@ function QuotaBar({ used, total, label }: { used: number; total: number; label: 
   );
 }
 
+function FunnelChart({ byStatus }: { byStatus: Record<Status, number> }) {
+  const stages: { key: Status; label: string; color: string }[] = [
+    { key: "saved",     label: "Saved",     color: "bg-zinc-400" },
+    { key: "applied",   label: "Applied",   color: "bg-blue-500" },
+    { key: "interview", label: "Interview", color: "bg-yellow-500" },
+    { key: "offer",     label: "Offer",     color: "bg-green-500" },
+  ];
+  const max = Math.max(...stages.map(s => byStatus[s.key] ?? 0), 1);
+  return (
+    <div className="space-y-1.5">
+      {stages.map((s, i) => {
+        const count = byStatus[s.key] ?? 0;
+        const pct = Math.round((count / max) * 100);
+        const prev = i > 0 ? (byStatus[stages[i - 1].key] ?? 0) : null;
+        const rate = prev && prev > 0 ? Math.round((count / prev) * 100) : null;
+        return (
+          <div key={s.key} className="flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground w-14 text-right shrink-0">{s.label}</span>
+            <div className="flex-1 bg-muted rounded-full h-5 overflow-hidden">
+              <div className={`h-full rounded-full ${s.color} transition-all flex items-center justify-end pr-2`}
+                style={{ width: `${Math.max(pct, count > 0 ? 8 : 0)}%` }}>
+                {count > 0 && <span className="text-[10px] font-bold text-white">{count}</span>}
+              </div>
+            </div>
+            {rate !== null && (
+              <span className="text-[10px] text-muted-foreground w-8 shrink-0">{rate}%</span>
+            )}
+          </div>
+        );
+      })}
+      {byStatus.rejected > 0 && (
+        <p className="text-[10px] text-muted-foreground text-right">{byStatus.rejected} rejected</p>
+      )}
+    </div>
+  );
+}
+
 function formatCountdown(dateStr: string): { label: string; urgent: boolean } {
   const diff = new Date(dateStr).getTime() - Date.now();
   if (diff < 0) return { label: "Past", urgent: false };
@@ -173,6 +210,8 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [feedPage, setFeedPage] = useState(0);
   const [isMock, setIsMock] = useState(false);
+  const [trackedUrls, setTrackedUrls] = useState<Set<string>>(new Set());
+  const [trackingUrl, setTrackingUrl] = useState<string | null>(null);
 
   const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem("access_token")}` });
 
@@ -208,6 +247,37 @@ export default function DashboardPage() {
     }
   };
 
+  const trackJob = async (m: { url: string; title: string; company: string; description: string; score: number }) => {
+    if (trackedUrls.has(m.url) || trackingUrl === m.url) return;
+    setTrackingUrl(m.url);
+    const token = localStorage.getItem("access_token");
+    try {
+      const jobRes = await fetch(`${BASE}/jobs/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ raw_jd: m.description || m.title, title: m.title, company: m.company }),
+      });
+      if (!jobRes.ok) throw new Error();
+      const job = await jobRes.json();
+      await fetch(`${BASE}/applications/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ job_id: job.id }),
+      });
+      setTrackedUrls(prev => new Set([...prev, m.url]));
+      toast.success(`Tracking "${m.title}"`);
+      // refresh apps list
+      const [newApps, jobs] = await Promise.all([api.applications.list(), api.jobs.list()]);
+      const jobMap = Object.fromEntries(jobs.map((j: Job) => [j.id, j]));
+      setApps(newApps.map((a: Application) => ({ ...a, job: jobMap[a.job_id] })));
+      setIsMock(false);
+    } catch {
+      toast.error("Failed to track job");
+    } finally {
+      setTrackingUrl(null);
+    }
+  };
+
   if (loading) return (
     <div className="flex items-center justify-center h-64">
       <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -236,9 +306,16 @@ export default function DashboardPage() {
         <StatCard icon={<Award className="w-4 h-4 text-green-600" />} label="Avg Match Score"
           value={stats?.avg_score ? `${stats.avg_score}%` : "—"}
           sub="across all tracked jobs" color="bg-green-100 dark:bg-green-900/40" />
-        <StatCard icon={<TrendingUp className="w-4 h-4 text-violet-600" />} label="Offer / Interview"
-          value={`${stats?.by_status.offer ?? 0} / ${stats?.by_status.interview ?? 0}`}
-          sub={`${stats?.by_status.rejected ?? 0} rejected`} color="bg-violet-100 dark:bg-violet-900/40" />
+        <Card className="border-border/60">
+          <CardContent className="p-4 space-y-2">
+            <p className="text-xs text-muted-foreground font-medium tracking-wide uppercase">Pipeline</p>
+            {stats?.by_status ? (
+              <FunnelChart byStatus={stats.by_status} />
+            ) : (
+              <p className="text-xs text-muted-foreground">No data yet</p>
+            )}
+          </CardContent>
+        </Card>
         <Card>
           <CardContent className="p-4 space-y-2">
             <div className="flex items-center gap-2">
@@ -465,10 +542,23 @@ export default function DashboardPage() {
                         </div>
                         <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{m.reason}</p>
                       </div>
-                      <a href={m.url} target="_blank" rel="noopener noreferrer"
-                        className="shrink-0 p-1.5 rounded hover:bg-muted transition-colors">
-                        <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
-                      </a>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => trackJob(m)}
+                          disabled={trackedUrls.has(m.url) || trackingUrl === m.url}
+                          title={trackedUrls.has(m.url) ? "Already tracked" : "Track this job"}
+                          className={`p-1.5 rounded transition-colors ${trackedUrls.has(m.url) ? "text-green-500" : "hover:bg-muted text-muted-foreground hover:text-foreground"}`}>
+                          {trackingUrl === m.url
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : trackedUrls.has(m.url)
+                              ? <Check className="w-3.5 h-3.5" />
+                              : <BookmarkPlus className="w-3.5 h-3.5" />}
+                        </button>
+                        <a href={m.url} target="_blank" rel="noopener noreferrer"
+                          className="p-1.5 rounded hover:bg-muted transition-colors">
+                          <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
+                        </a>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
